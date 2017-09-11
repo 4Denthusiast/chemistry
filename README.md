@@ -5,16 +5,12 @@ A highly messy program for calculating properties of 4D atoms with an additional
 ## Building & Running
 
 1. clone repository
-2. Install stack: https://docs.haskellstack.org/en/stable/README/
-3. Initialise stack
-  $ stack setup
-4. build
-  $ stack build
+2. Install [stack](https://docs.haskellstack.org/en/stable/README/)
+3. Initialise stack: `$ stack setup`
+4. build: `$ stack build`
 5. run
-  * To print properties of a specific atom (with charge in the format "n" or "n-"):
-    $ stack run chemistry graph <atomic number> [<charge>]
-  * To calculate the electron arrangements of all elements up to a specified atomic number
-    $ stack run chemistry ea <atomic number>
+  * To print properties of a specific atom (with charge in the format "n" or "n-"): `$ stack run chemistry graph &lt;atomic number&gt; [<charge>]`
+  * To calculate the electron arrangements of all elements up to a specified atomic number: `$ stack run chemistry ea <atomic number>`
 
 ## Features
 
