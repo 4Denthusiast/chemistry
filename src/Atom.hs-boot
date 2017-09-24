@@ -16,7 +16,8 @@ data Atom = Atom
         orbitals :: [[Orbital]],
         shieldingPotentials :: [[Potential]],
         atomGrid :: Grid,
-        prevOccs :: [[Int]]
+        prevOccs :: [[Int]],
+        forcedEA :: Maybe [(N, L, Int)]
     }
 
 energies' :: Atom -> [[Energy]]
