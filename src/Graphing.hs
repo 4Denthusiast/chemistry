@@ -30,7 +30,7 @@ vs = basePotential rs 0 1
 ψs' = map (std . fst) ψs
 
 denormalize :: [(Double, Double)] -> [(Double, Double)]
-denormalize or@((r0,ψ0):(r1,ψ1):_) = map (\(r, ψ) -> (r, ψ*s*r^0)) or
+denormalize or@((r0,ψ0):(r1,ψ1):_) = map (\(r, ψ) -> (r, ψ*s*r^1)) or
     where s = (r1-r0)/(ψ1-ψ0)
 
 drawGraph :: IO ()

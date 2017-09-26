@@ -22,10 +22,11 @@ module Orbital(
 import Dual
 import Data.List (dropWhileEnd)
 import Data.Bifunctor (first)
+import Data.Bits.Floating.Ulp
 
 import System.IO.Unsafe
 import Data.IORef
---import Debug.Trace
+import Debug.Trace (trace)
 traceShow = const id
 
 type Potential = [Double]
@@ -39,7 +40,7 @@ data Spin = Up | Down deriving (Eq, Ord, Enum)
 instance Show Spin where{show Up = "↑"; show Down = "↓"}
 
 logGrid :: Double -> Double -> Grid
-logGrid spacing z = iterate (* (1 + spacing)) (z ** 0.0 * 0.5)
+logGrid spacing z = iterate (* (1 + spacing)) (log (slimConstant/coulumb'sConstant) - 3/(sqrt z +1))
 
 puddingGrid :: Double -> Double -> Grid
 puddingGrid spacing z = (takeWhile (< 1) $ map (*spacing) [3..]) ++ logGrid spacing z
@@ -103,6 +104,8 @@ findEnergyHinted e0 rs vs n = let
         iter e ll hh = traceShow e $ let
                 orbital      = trimmedOrbital rs vs e
                 ((ψ, dψ), r) = last $ zip orbital rs
+                roundError   = doubleUlp e * ((\(Dual _ x) -> x) ψ)
+                roundWarning = if roundError * r > 0.01 then trace "Rounding error." else id
                 err          = ψ + (dual r*0.2)*dψ
                 e'           = let (Dual era ere) = err in max (e*1.6) $ min (e*0.6) $ e - era/ere
                 n1           = principalNumber rs orbital
@@ -112,7 +115,7 @@ findEnergyHinted e0 rs vs n = let
                     | n1 < n                 = traceShow n1 $ traceShow n $ iter (0.6 * max e ll) (0.8 * max e ll) hh
                     | n1 > n                 = traceShow n1 $ traceShow n $ iter (1.5 * min e hh) ll (1.2 * min e hh)
                     | otherwise              = iter e' ll hh
-            in stashOrbital vs orbital e''
+            in roundWarning $ stashOrbital vs orbital e''
     in
         if orbitalExists rs vs n then iter e0' (-1/0) 0 else 0
 
