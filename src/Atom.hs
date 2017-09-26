@@ -265,11 +265,12 @@ correctEA atom = case forcedEA atom of
     Nothing -> True
 
 relaxAtom :: Atom -> Atom
-relaxAtom atom = relax' atom' (totalEnergy atom') (S.singleton $ electronArrangement atom')
+relaxAtom atom = relax' atom' S.empty
     where atom' = updateAtomUntilConvergence $ forceEA atom (electronArrangement atom)
-          relax' bestA bestE triedEAs = if null nextAtoms then bestA else relax' bestA' bestE' triedEAs'
+          relax' bestA triedEAs = case as of {[] -> bestA; (bestA':_) -> relax' bestA' triedEAs'}
               where nextEAs = filter (flip S.notMember triedEAs) $ atomAdjEAs bestA
-                    nextAtoms = filter correctEA $ map (updateAtomUntilConvergence . forceEA bestA) nextEAs
-                    cmp = on compare (\(a,b,_)->(abs b,a))
-                    (bestE', _, bestA') = minimumBy cmp $ (bestE, incorrectCharge bestA, bestA) : map (\a -> (totalEnergy a, incorrectCharge a, a)) nextAtoms
-                    triedEAs' = S.union triedEAs $ S.fromList nextEAs
+                    nextAtomInits = sortOn totalEnergy $ map (forceEA bestA) nextEAs
+                    nextAtoms = map updateAtomUntilConvergence nextAtomInits
+                    (failedAtoms, as) = span (not . better) nextAtoms
+                    better a = correctEA a && on (<) (\a' -> (abs (incorrectCharge a'), totalEnergy a')) a bestA
+                    triedEAs' = S.union triedEAs $ S.fromList $ map (fromJust . forcedEA) $ bestA : failedAtoms
