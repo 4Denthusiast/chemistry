@@ -1,6 +1,5 @@
 module Lib(
     processAtom,
-    drawGraph,
     printEaTable
 ) where
 
@@ -34,5 +33,3 @@ printEaTable = mapM_ processElement . flip take aperiodicTable
             putStr ":  "
             putStrLn $ prettyElectronArrangement a
             graphAtom a
-
---eaTable = map (\a -> show (atomicNumber a) ++ ": " ++ prettyElectronArrangement a) aperiodicTable

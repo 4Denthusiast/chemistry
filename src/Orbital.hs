@@ -1,6 +1,5 @@
 module Orbital(
     logGrid,
-    puddingGrid,
     basePotential,
     trimmedOrbital,
     realOrbital,
@@ -15,8 +14,6 @@ module Orbital(
     Energy,
     L,N,Spin(..),
     dropWhileEndExcept,
-    stashOrbital,
-    readStash
 ) where
 
 import Dual
@@ -24,10 +21,8 @@ import Data.List (dropWhileEnd)
 import Data.Bifunctor (first)
 import Data.Bits.Floating.Ulp
 
-import System.IO.Unsafe
-import Data.IORef
-import Debug.Trace (trace)
-traceShow = const id
+import Debug.Trace
+traceShow1 = const id
 
 type Potential = [Double]
 type Grid = [Double] -- radius sampling points
@@ -42,17 +37,13 @@ instance Show Spin where{show Up = "↑"; show Down = "↓"}
 logGrid :: Double -> Double -> Grid
 logGrid spacing z = iterate (* (1 + spacing)) (log (slimConstant/coulumb'sConstant) - 3/(sqrt z +1))
 
-puddingGrid :: Double -> Double -> Grid
-puddingGrid spacing z = (takeWhile (< 1) $ map (*spacing) [3..]) ++ logGrid spacing z
-
 -- The effective potential purely from nuclear charge and angular momentum
 basePotential :: Grid -> Double -> Double -> Potential
 basePotential grid l charge = map (\r -> l*(l+2) * r^^(-2) + coulumbForce r) grid
     where coulumbForce r = charge * (-coulumb'sConstant + slimConstant / exp r) / (r*r)
 
-coulumb'sConstant :: Double
+coulumb'sConstant, slimConstant :: Double
 coulumb'sConstant = 1
-slimConstant :: Double
 slimConstant = 7
 
 -- Calculates the orbital with the fixed energy value.
@@ -101,7 +92,7 @@ findEnergyHinted e0 rs vs n = let
         e0' = min e0 (-1e-16)
         approxEq a b = abs (a-b) < 1e-12 * min (abs a) (abs b)
         iter :: Energy -> Energy -> Energy -> Energy
-        iter e ll hh = traceShow e $ let
+        iter e ll hh = traceShow1 e $ let
                 orbital      = trimmedOrbital rs vs e
                 ((ψ, dψ), r) = last $ zip orbital rs
                 roundError   = doubleUlp e * ((\(Dual _ x) -> x) ψ)
@@ -112,10 +103,10 @@ findEnergyHinted e0 rs vs n = let
                 e''
                     | e > -1e-20             = 0
                     | approxEq e' e          = e
-                    | n1 < n                 = traceShow n1 $ traceShow n $ iter (0.6 * max e ll) (0.8 * max e ll) hh
-                    | n1 > n                 = traceShow n1 $ traceShow n $ iter (1.5 * min e hh) ll (1.2 * min e hh)
+                    | n1 < n                 = traceShow1 n1 $ traceShow1 n $ iter (0.6 * max e ll) (0.8 * max e ll) hh
+                    | n1 > n                 = traceShow1 n1 $ traceShow1 n $ iter (1.5 * min e hh) ll (1.2 * min e hh)
                     | otherwise              = iter e' ll hh
-            in roundWarning $ stashOrbital vs orbital e''
+            in roundWarning e''
     in
         if orbitalExists rs vs n then iter e0' (-1/0) 0 else 0
 
@@ -127,15 +118,3 @@ normalizedOrbital rs vs e = map (/ scale) o
     where o     = realOrbital rs vs e
           o'    = zipWith3 (\ψ r r' -> ψ*ψ*r*r*r*(r'-r)) o rs (tail rs)
           scale = sqrt $ sum o'
-
--- This is extremely stupid and potentially unreliable.
-orbitalStash :: IORef (Potential, DOrbital)
-orbitalStash = unsafePerformIO $ newIORef ([], [])
-
-stashOrbital :: Potential -> DOrbital -> a -> a
---stashOrbital vs orb = seq (unsafePerformIO $ writeIORef orbitalStash (vs, orb))
-stashOrbital = const $ const id
-
--- Perhaps I can pretend I'm not quite depraved.
-readStash :: IO (Potential, DOrbital)
-readStash = readIORef orbitalStash

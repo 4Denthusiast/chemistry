@@ -1,6 +1,6 @@
 # Ab initio 4D quantum chemistry simulation
 
-A highly messy program for calculating properties of 4D atoms with an additional short-range repulsive force, using an approximation to the Hartree-Fock method.
+An incomplete program for calculating properties of 4D atoms with an additional short-range repulsive force, using an approximation to the Hartree-Fock method.
 
 ## Building & Running
 
@@ -9,7 +9,7 @@ A highly messy program for calculating properties of 4D atoms with an additional
 3. Initialise stack: `$ stack setup`
 4. build: `$ stack build`
 5. run
-  * To print properties of a specific atom (with charge in the format "n" or "n-"): `$ stack run chemistry graph &lt;atomic number&gt; [<charge>]`
+  * To print properties of a specific atom (with charge in the format "n" or "n-"): `$ stack run chemistry graph <atomic number> [<charge>]`
   * To calculate the electron arrangements of all elements up to a specified atomic number: `$ stack run chemistry ea <atomic number>`
 
 ## Features

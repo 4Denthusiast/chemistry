@@ -35,7 +35,7 @@ asymptoticDecline atom n l = (a, k)
           (ψ, r) = (!!30) $ reverse $ zip orb (atomGrid atom)
           k      = ψ / (r**(-1.5) * exp (-a*r))
 
--- Uses the expression for the asymptotic decline to approximate what the orbital would do. (Tweaking the energy at regular intervals would be a much better way of doing this, but also far more complicated.
+-- Uses the expression for the asymptotic decline to approximate what the orbital would do. (Tweaking the energy at regular intervals would be a much more accurate way of doing this, but also far more complicated.
 extendedOrbital :: Atom -> N -> L -> Orbital
 extendedOrbital atom n l = replace (dropEnd 30 orb) orbTail
     where (a, k)      = asymptoticDecline atom n l

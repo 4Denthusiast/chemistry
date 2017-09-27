@@ -60,7 +60,7 @@ instance (Eq a, Num a, KnownNat n) => Num (Polynomial n a) where
     (Polynomial xs) + (Polynomial ys) = simplifyPoly (xs ++ ys)
     negate (Polynomial xs)            = Polynomial (map (fmap negate) xs)
     (Polynomial xs) * (Polynomial ys) = simplifyPoly (monomialTimes <$> xs <*> ys)
-    abs _ = error "Typeclass: Num doesn't contain a method: conjugate"
+    abs _ = error "The typeclass Num doesn't contain a method: conjugate"
     signum _ = error "Signum doesn't make much sense for polynomials."
     fromInteger = constant . fromInteger
 

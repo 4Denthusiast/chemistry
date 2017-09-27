@@ -39,7 +39,5 @@ instance (Real n) => Real (Dual n) where
     toRational = toRational . std
 
 instance (Eq n, Fractional n) => Fractional (Dual n) where
-    (Dual a e) / (Dual a' e')
-        | a == 0 && a' == 0 = dual (e / e')
-        | otherwise         = Dual (a / a') (e / a')
+    recip (Dual a e) = Dual (1/a) (-e/(a*a))
     fromRational = dual . fromRational

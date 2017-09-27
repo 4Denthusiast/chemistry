@@ -1,7 +1,5 @@
 module AtomEnergy(
     totalEnergy,
-    simpleEnergy,
-    halvedEnergy,
     orbitalEnergy,
     approxOrbitalEnergy,
     splitSpin,
@@ -15,14 +13,7 @@ import Data.List
 
 
 totalEnergy :: Atom -> Energy
-totalEnergy = halvedEnergy
-
--- This double counts the repulsion terms between electrons, rendering it highly inaccurate.
-simpleEnergy :: Atom -> Energy
-simpleEnergy atom = sum $ map (\(n, l, o) -> (energies atom !! l !! (n-1)) * fromIntegral o) $ electronArrangement atom
-
-halvedEnergy :: Atom -> Energy
-halvedEnergy atom = sum nuclearEnergies + sum eeEnergies
+totalEnergy atom = sum nuclearEnergies + sum eeEnergies
     where ea              = concatMap splitSpin $ electronArrangement atom
           nuclearEnergies = map (nuclearEnergy atom) ea
           eeEnergies      = concat $ zipWith (zipWith (eeEnergy atom) . repeat) ea (tails ea)

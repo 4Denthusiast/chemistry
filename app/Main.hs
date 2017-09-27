@@ -16,10 +16,11 @@ main = do
             []     -> putStrLn "Argument required: max atomic number"
             [z]    -> printEaTable (read z)
             _      -> putStrLn "too many arguments"
-        [] -> putStrLn "Argument required: action"
+        [] -> putStrLn "Argument required: action (options: \"graph\", \"ea\")"
         x:_ -> putStrLn ("Argument not recognised: " ++ x)
 
 
+-- Starting commend-line aarguments with "-" interferes with Stack, and putting the sign at the end is standard chemical notation anyway.
 parseSignedNumber :: String -> Int
 parseSignedNumber s
     | last s == '-' = negate $ read $ reverse $ tail $ reverse $ s

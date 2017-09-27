@@ -27,12 +27,9 @@ import qualified Data.Set as S
 import Data.Function
 import Data.Maybe
 import Debug.Trace
-{-traceShow = const id
-trace = const id
-traceShowId = id-}
 
 
-angularMomentumLabels = "spdfghk" ++ repeat 'R'
+angularMomentumLabels = "spdfghi" ++ ['k'..'z'] ++ repeat 'R' -- "R" for "Rydberg".
 
 data Atom = Atom
     {
@@ -46,9 +43,6 @@ data Atom = Atom
         forcedEA :: Maybe [(N, L, Int)] --a value of Nothing represents that the electron arrangement should be determined from energies.
     }
 
-fnPower :: Int -> (a -> a) -> a -> a
-fnPower 0 f x = x
-fnPower n f x = f (fnPower (n-1) f x)
 
 energies' :: Atom -> [[Energy]]
 energies' = takeWhile (not . null) . energies
@@ -89,15 +83,15 @@ fillAtom atom =
         if done then atom else fillAtom $ addOrbital occ atom
 
 electronArrangement :: Atom -> [(N, L, Int)]
-electronArrangement atom = maybe x7 trimEA $ forcedEA atom
-    where x1 = concat $ zipWith (zipWith (const id)) (energies' atom) indices
-          x2 = (\s (n, l) -> (approxOrbitalEnergy atom (n, l, s), n, l)) <$> [Up, Down] <*> x1
-          x3 = sort $ filter ((<0) . fst3) x2
-          spareElectrons = electronsRequired atom
-          x4 = map (\(e, n, l) -> (n, l, (l+1)^2)) x3
-          x5 = snd $ mapAccumL (\a (n,l,ll) -> (a-min a ll, (n, l, min a ll))) spareElectrons x4
-          x6 = takeWhile ((>0) . þrd3) x5
-          x7 = mergeSpins x6
+electronArrangement atom = maybe ea trimEA $ forcedEA atom
+    where spareElectrons = electronsRequired atom
+          ea = mergeSpins $
+               takeWhile ((>0) . þrd3) $
+               snd $ mapAccumL (\a (n,l,ll) -> (a-min a ll, (n, l, min a ll))) spareElectrons $
+               map (\(e, n, l) -> (n, l, (l+1)^2)) $
+               sort $ filter ((<0) . fst3) $
+               (\s (n, l) -> (approxOrbitalEnergy atom (n, l, s), n, l)) <$> [Up, Down] <*>
+               (concat $ zipWith (zipWith (const id)) (energies' atom) indices)
           mergeSpins = mergeBy (\(n0, l0, o0) (n1, l1, o1) -> if n0 == n1 && l0 == l1 then Just (n0,l0,o0+o1) else Nothing)
           trimEA = map (\(n,l,o) -> (n,l,min o (1+(fromMaybe 0 $ get (n-1) =<< get l (prevOccs atom))))) . mergeSpins . map (\(n,l,s,o) -> (n,l,o)) . filter ((<0) . approxOrbitalEnergy atom . (\(n,l,s,o) -> (n,l,s))) . concatMap splitSpin
           get i xs = fst <$> uncons (drop i xs)
@@ -137,7 +131,7 @@ genOrbitalAt :: Atom -> N -> L -> Energy -> (Energy, Orbital, Potential)
 genOrbitalAt atom n l e0 = (e, o, p)
     where rs = atomGrid atom
           vs = getPotential atom n l Nothing
-          e  = {-trace ("n" ++ show n ++ "l" ++ show l) $-} findEnergyHinted e0 rs vs n
+          e  = findEnergyHinted e0 rs vs n
           o  = normalizedOrbital rs vs e
           pn = genShieldingPotential rs o
           po = ((map Just $ shieldingPotentials atom !! l) ++ repeat Nothing) !! (n-1)
@@ -156,7 +150,7 @@ updateAtom small atom = (if small then id else fillAtom) $ let
         }
 
 updateAtomUntilConvergence :: Atom -> Atom
-updateAtomUntilConvergence atom = if atomsSimilar atom next {-|| not (correctEA next)-} then next else updateAtomUntilConvergence next
+updateAtomUntilConvergence atom = if atomsSimilar atom next then next else updateAtomUntilConvergence next
     where next = traceShow (energies' atom) $ {-traceShow (carefulEnergies atom) $-} traceShow (prettifyElectronArrangement atom <$> forcedEA atom) $ trace (prettyElectronArrangement atom) $ updateAtom True atom
 
 atomsSimilar :: Atom -> Atom -> Bool
@@ -194,7 +188,7 @@ getShieldingPotential atom n0 l0 s0 = if length (orbitals atom !! l0) < n0 then 
           rs        = atomGrid atom
           orbOverlap n l = if zeroEnergy then 0 else
               (/fromIntegral (l+l0+1)) $ sum $ zipWith4 (\r r' ψ0 ψ1 -> abs (r*r*r*(r'-r)*ψ0*ψ1)) rs (tail rs) ψs0 $ orbitals atom !! l !! (n-1)
-          occ n l o = {-trace (show n0 ++ "," ++ show l0 ++ ", " ++ show occ0 ++ ", " ++ show n ++ "," ++ show l ++ ", " ++ show o) $ traceShow (orbOverlap n l) $ traceShowId $-} if n == n0 && l == l0 
+          occ n l o = if n == n0 && l == l0 
               then upOcc0*(occ0-upOcc0)/occ0 + max 0 (occ0 - 1)/2
               else o - orbOverlap n l * (o - o/occ0 * upOcc0 + (2*upOcc0/occ0 - 1) * min o (fromIntegral (l+1)^2))
           scaledVs  = map (\(n,l,o) -> map (* occ n l (fromIntegral o)) (shieldingPotentials atom !! l !! (n-1))) arr
@@ -214,7 +208,7 @@ prettifyElectronArrangement atom ea = (unwords $ map (\(n, l, o) -> show (n+l) +
           chargeLabel = if errorCharge == 0 then "" else "  " ++ show errorCharge ++ "!!"
 
 atomFull :: Atom -> Bool
-atomFull atom = electronsRequired atom == sum (map þrd3 $ electronArrangement atom)
+atomFull atom = incorrectCharge atom == 0
 
 incrementAtom :: Atom -> Atom
 incrementAtom atom = relaxAtom $ copyAtom atom (atomicNumber atom + 1) (charge atom)
@@ -225,11 +219,9 @@ anionise  :: Atom -> Atom
 anionise  atom = relaxAtom atom{charge = charge atom - 1}
 
 aperiodicTable :: [Atom]
---aperiodicTable = map (flip makeAtom 0) [1..]
 aperiodicTable = iterate incrementAtom (makeAtom 1 0)
 
 
--- TODO remove electrons when the charge requires it (e.g. when cationising)
 atomAdjEAs :: Atom -> [[(N, L, Int)]]
 atomAdjEAs atom = adjacentElectronArrangements (electronArrangement atom) (electronsRequired atom)
 
