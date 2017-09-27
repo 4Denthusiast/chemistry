@@ -86,7 +86,7 @@ fillAtom atom =
         done = (all (\(es, n) -> not $ null $ drop n es) $ zip (energies atom) occ)
             && (length occ < length (energies' atom))
     in
-        if done then atom else fillAtom $ addOrbital atom
+        if done then atom else fillAtom $ addOrbital occ atom
 
 electronArrangement :: Atom -> [(N, L, Int)]
 electronArrangement atom = maybe x7 trimEA $ forcedEA atom
@@ -108,17 +108,20 @@ prevElectronArrangement = concat . zipWith (zipWith (\(n, l) o -> (n, l, o))) in
 indices :: [[(N, L)]]
 indices = [[(n, l) | n <- [1..]] | l <- [0..]]
 
+
+occupations' :: [(N,L,Int)] -> [Int]
+occupations' = map length . group . sort . map snd3
 occupations :: Atom -> [Int]
-occupations atom = map length $ group $ sort $ map snd3 $ electronArrangement atom
+occupations  = occupations' . electronArrangement
 
-addOrbital :: Atom -> Atom
-addOrbital atom = addOrbitalAt atom (getNextOrbital $ energies' atom)
+addOrbital :: [Int] -> Atom -> Atom
+addOrbital occs atom = addOrbitalAt atom (getNextOrbital occs $ energies' atom)
 
-getNextOrbital :: [[Energy]] -> L
-getNextOrbital [] = 0
-getNextOrbital es
+getNextOrbital :: [Int] -> [[Energy]] -> L
+getNextOrbital occs [] = 0
+getNextOrbital occs es
     | length (last es) > 1 = length es
-    | otherwise            = snd $ minimum $ zip (map last es) [0..]
+    | otherwise            = snd3 $ minimum $ filter (\(e, l, occ) -> null $ drop occ e) $ zip3 es [0..] (occs++repeat 0)
 
 addOrbitalAt :: Atom -> L -> Atom
 addOrbitalAt atom l = atom
@@ -140,9 +143,10 @@ genOrbitalAt atom n l e0 = (e, o, p)
           po = ((map Just $ shieldingPotentials atom !! l) ++ repeat Nothing) !! (n-1)
           p  = (zipWith (\a b -> a + 0.4*(b-a)) pn) $ maybe (repeat 0) id po
 
-updateAtom :: Atom -> Atom
-updateAtom atom = fillAtom $ let
-        (es', ψs', vs') = unzip3 $ map unzip3 $ zipWith (zipWith $ uncurry $ genOrbitalAt atom) indices (energies'' atom)
+updateAtom :: Bool -> Atom -> Atom
+updateAtom small atom = (if small then id else fillAtom) $ let
+        es = maybe id (zipWith take . occupations') (if small then forcedEA atom else Nothing) (energies'' atom)
+        (es', ψs', vs') = unzip3 $ map unzip3 $ zipWith (zipWith $ uncurry $ genOrbitalAt atom) indices es
     in atom
         {
             energies = es' ++ repeat [],
@@ -153,7 +157,7 @@ updateAtom atom = fillAtom $ let
 
 updateAtomUntilConvergence :: Atom -> Atom
 updateAtomUntilConvergence atom = if atomsSimilar atom next {-|| not (correctEA next)-} then next else updateAtomUntilConvergence next
-    where next = traceShow (energies' atom) $ {-traceShow (carefulEnergies atom) $-} traceShow (prettifyElectronArrangement atom <$> forcedEA atom) $ trace (prettyElectronArrangement atom) $ updateAtom atom
+    where next = traceShow (energies' atom) $ {-traceShow (carefulEnergies atom) $-} traceShow (prettifyElectronArrangement atom <$> forcedEA atom) $ trace (prettyElectronArrangement atom) $ updateAtom True atom
 
 atomsSimilar :: Atom -> Atom -> Bool
 atomsSimilar a0 a1 = electronArrangement a0 == electronArrangement a1 &&
@@ -269,7 +273,7 @@ relaxAtom atom = relax' atom' S.empty
     where atom' = updateAtomUntilConvergence $ forceEA atom (electronArrangement atom)
           relax' bestA triedEAs = case as of {[] -> bestA; (bestA':_) -> relax' bestA' triedEAs'}
               where nextEAs = filter (flip S.notMember triedEAs) $ atomAdjEAs bestA
-                    nextAtomInits = sortOn totalEnergy $ map (forceEA bestA) nextEAs
+                    nextAtomInits = sortOn totalEnergy $ map (forceEA $ updateAtom False bestA) nextEAs
                     nextAtoms = map updateAtomUntilConvergence nextAtomInits
                     (failedAtoms, as) = span (not . better) nextAtoms
                     better a = correctEA a && on (<) (\a' -> (abs (incorrectCharge a'), totalEnergy a')) a bestA
