@@ -17,12 +17,11 @@ module Orbital(
 ) where
 
 import Dual
-import Data.List (dropWhileEnd)
+import Data.List (dropWhileEnd, group)
 import Data.Bifunctor (first)
 import Data.Bits.Floating.Ulp
 
 import Debug.Trace
-traceShow1 = const id
 
 type Potential = [Double]
 type Grid = [Double] -- radius sampling points
@@ -69,16 +68,7 @@ dropWhileEndExcept :: (a -> Bool) -> Int -> [a] -> [a]
 dropWhileEndExcept f n = (\(t, h) -> reverse h ++ take n (reverse t)) . span f . reverse
 
 principalNumber :: Grid -> DOrbital -> N
-principalNumber rs ψs = fst $ foldl
-    (\(n, f) ψ ->
-        if f && ψ < (-0.01) then
-            (n+1, False)
-        else if not f && ψ > 0.01 then
-            (n+1, True)
-        else
-            (n, f)
-    )
-    (0, False) (zipWith ((*) . std . fst) ψs rs)
+principalNumber rs = length . filter head . group . map ((<0) . uncurry (*))
 
 orbitalExists :: Grid -> Potential -> N -> Bool
 orbitalExists rs vs n = principalNumber rs orb >= n && (not $ null $ filter (<0) $ map fst $ orb)
@@ -87,24 +77,27 @@ orbitalExists rs vs n = principalNumber rs orb >= n && (not $ null $ filter (<0)
 findEnergy :: Grid -> Potential -> N -> Energy
 findEnergy = findEnergyHinted (-1)
 
+traceShow1 :: Show a => a -> b -> b
+traceShow1 = traceShow
+
 findEnergyHinted :: Energy -> Grid -> Potential -> N -> Energy
-findEnergyHinted e0 rs vs n = let
+findEnergyHinted e0 rs vs n = traceShow1 (e0, n) $ let
         e0' = min e0 (-1e-16)
         approxEq a b = abs (a-b) < 1e-12 * min (abs a) (abs b)
         iter :: Energy -> Energy -> Energy -> Energy
         iter e ll hh = traceShow1 e $ let
                 orbital      = trimmedOrbital rs vs e
-                ((ψ, dψ), r) = last $ zip orbital rs
+                ((ψ, dψ), r, v) = last $ zip3 orbital rs vs
                 roundError   = doubleUlp e * ((\(Dual _ x) -> x) ψ)
                 roundWarning = if roundError * r > 0.01 then trace "Rounding error." else id
-                err          = ψ + (dual r*0.2)*dψ
+                err          = ψ + dual (1 / (sqrt (-2*e)+1.5/r))*dψ
                 e'           = let (Dual era ere) = err in max (e*1.6) $ min (e*0.6) $ e - era/ere
                 n1           = principalNumber rs orbital
                 e''
                     | e > -1e-20             = 0
                     | approxEq e' e          = e
-                    | n1 < n                 = traceShow1 n1 $ traceShow1 n $ iter (0.6 * max e ll) (0.8 * max e ll) hh
-                    | n1 > n                 = traceShow1 n1 $ traceShow1 n $ iter (1.5 * min e hh) ll (1.2 * min e hh)
+                    | n1 < n                 = traceShow1 n1 $ traceShow1 n $ iter (0.3^(n-n1) * max e ll) (0.7 * max e ll) hh
+                    | n1 > n                 = traceShow1 n1 $ traceShow1 n $ iter (3.0^(n1-n) * min e hh) ll (1.4 * min e hh)
                     | otherwise              = iter e' ll hh
             in roundWarning e''
     in
@@ -118,3 +111,6 @@ normalizedOrbital rs vs e = map (/ scale) o
     where o     = realOrbital rs vs e
           o'    = zipWith3 (\ψ r r' -> ψ*ψ*r*r*r*(r'-r)) o rs (tail rs)
           scale = sqrt $ sum o'
+
+aimLengths :: DOrbital -> [Double]
+aimLengths = map (std . uncurry (/))

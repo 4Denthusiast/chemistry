@@ -8,6 +8,7 @@ import Dual
 import Atom
 import OrbitalShape
 
+import Control.Monad
 import Graphics.Rendering.Chart.Easy
 import Graphics.Rendering.Chart.Backend.Diagrams(toFile)
 import Graphics.Rendering.Chart.Axis.Floating
@@ -32,8 +33,8 @@ denormalize :: [(Double, Double)] -> [(Double, Double)]
 denormalize or@((r0,ψ0):(r1,ψ1):_) = map (\(r, ψ) -> (r, ψ*s*r^1)) or
     where s = (r1-r0)/(ψ1-ψ0)
 
-graphValues :: Grid -> [Double] -> IO ()
-graphValues rs xs = toFile def "chart.svg" $ do
+graphValues :: Double -> Grid -> [[Double]] -> IO ()
+graphValues lim rs xs = toFile def "chart.svg" $ do
         layout_title .= "Thing"
         layout_x_axis . laxis_generate .= autoScaledLogAxis (LogAxisParams (map show))
-        plot (line "Values" [zip rs xs])
+        forM_ xs (plot . line "Values" . (:[]) . zip rs . map (min lim . max (-lim)))
