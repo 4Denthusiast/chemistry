@@ -16,7 +16,7 @@ data Atom = Atom
         orbitals :: [[Orbital]],
         shieldingPotentials :: [[Potential]],
         atomGrid :: Grid,
-        prevOccs :: [[Int]],
+        prevOccs :: [[Double]],
         forcedEA :: Maybe [(N, L, Int)]
     }
 

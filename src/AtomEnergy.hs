@@ -62,9 +62,9 @@ orbitalEnergy atom (n, l, s) = nuclearEnergy atom (n, l, s, 1)
     + sum (map (eeEnergy atom (n,l,s,1)) $ concatMap splitSpin $ prevElectronArrangement atom)
 
 carefulEnergies :: Atom -> [[[Energy]]]
-carefulEnergies atom = map3 (orbitalEnergy atom) $ map3 (\(n,l,s,o) -> (n,l,s)) $ map2 splitSpin $ zipWith3 (zipWith3 (\e (n,l) o -> (n,l,o))) (energies' atom) indices (map (++ repeat 0) (prevOccs atom) ++ repeat (repeat 0))
+carefulEnergies atom = map3 (orbitalEnergy atom) $ map3 (\(n,l,s,o) -> (n,l,s)) $ map2 splitSpin $ zipWith3 (zipWith3 (\e (n,l) o -> (n,l,round o))) (energies' atom) indices (map (++ repeat 0) (prevOccs atom) ++ repeat (repeat 0))
     where map2 = map . map
           map3 = map . map2
 
 approxOrbitalEnergy :: Atom -> (N, L, Spin) -> Energy
-approxOrbitalEnergy atom (n, l, s) = energies atom !! l !! (n-1)
+approxOrbitalEnergy atom (n, l, s) = ((energies atom !! l) ++ repeat 0) !! (n-1)
