@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8"/>
+        <title id="title">Orbital charts</title>
+        <style>
+            html, body, div{
+                display: flex;
+            }
+            
+            html{
+                height: 100%;
+                width: 100%;
+            }
+            
+            body{
+                flex-direction: column;
+                align-items: stretch;
+                padding:1em;
+                align-self:stretch;
+                flex:1;
+            }
+            
+            div{
+                justify-content: space-around;
+            }
+        </style>
+    </head>
+    <body>
+        <div style="flex:1;">
+            <img id="chart" style="height:100%;"/>
+        </div>
+        <div style="flex:0;">
+            <button id="left" onclick="left()">&lt;</button>
+            <input id="input" type="number" id="Z" onchange="setZ(this.value)">
+            <button onclick="right()">&gt;</button>
+        </div>
+        <script>
+            var atomicNumber = 1;
+            const inputEl = document.getElementById("input");
+            const chartEl = document.getElementById("chart");
+            const  leftEl = document.getElementById("left");
+            
+            {
+                let params = (new URL(location)).searchParams;
+                if(params.has("Z"))
+                    setZ(params.get("Z"));
+                else
+                    setZ(1);
+            }
+            
+            function left(){
+                if(atomicNumber > 1)
+                    setZ(atomicNumber - 1);
+            }
+            
+            function right(){
+                setZ(atomicNumber + 1);
+            }
+            
+            function setZ(z){
+                atomicNumber = z*1;
+                inputEl.value = atomicNumber;
+                chartEl.src = atomicNumber+".svg";
+                leftEl.disabled = atomicNumber <= 1;
+            }
+        </script>
+    </body>
+</html>
