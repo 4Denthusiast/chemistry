@@ -74,7 +74,7 @@ copyAtom atom z c = atom
     }
 
 makeAtom :: Int -> Int -> Atom
-makeAtom z c = relaxAtom $ fillAtom $ emptyAtom z c
+makeAtom z c = relaxAtom $ emptyAtom z c
 
 fillAtom :: Atom -> Atom
 fillAtom atom = 
@@ -233,16 +233,17 @@ atomAdjEAs :: Atom -> [[(N, L, Int)]]
 atomAdjEAs atom = adjacentElectronArrangements (electronArrangement atom) (electronsRequired atom)
 
 adjacentElectronArrangements :: [(N, L, Int)] -> Int -> [[(N, L, Int)]]
-adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . þrd3)) $ case signum (eReq - sum oByL) of
+adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . þrd3)) $ case signum errCharge of
         -1 -> positiveOthers ++ others
         0  -> others
-        1  -> negativeOthers ++ others
+        1  -> negativeOthers ++ veryNegativeOthers ++ others
     where eaByL = groupBy (on (==) snd3) $ sortOn snd3 ea
           maxL  = snd3 $ head $ last $ [(1,-1,0)] : eaByL
           nextL [] _ = ([], [])
           nextL (xs@((_,l0,_):_):xss) l = if l0 == l then (xss, xs) else (xs:xss, [])
           eaByL' = snd $ mapAccumL nextL eaByL [0..maxL+1]
           oByL   = map (sum . map þrd3) eaByL'
+          errCharge = eReq - sum oByL
           newOrbs = flip (zipWith (,,0)) [0..] $ map ((+1) . fst3 . last . ((0,0,0):)) eaByL'
           additionFrontier = unionBy (on (==) snd3) (filter (\(n,l,o) -> o < 2*(l+1)^2) ea) newOrbs
           removalFrontier  = mergeBy (\x0@(_,l0,_) x1@(_,l1,_) -> if l0 == l1 then Just (max x0 x1) else Nothing) ea
@@ -258,6 +259,7 @@ adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . 
           chargedEA o' (na,la,oa) = (na,la,oa+o') : (delete (na,la,oa) ea)
           positiveOthers = map (chargedEA (-1))  removalFrontier
           negativeOthers = map (chargedEA   1 ) additionFrontier
+          veryNegativeOthers = map (\(n,l,o,o') -> chargedEA o' (n,l,o)) $ filter ((>1) . frþ4) $ (\(n,l,o) -> (n,l,o,min errCharge $ 2*(l+1)^2-o)) <$> additionFrontier
 
 forceEA :: Atom -> [(N, L, Int)] -> Atom
 forceEA atom ea = atom{forcedEA = Just ea}
