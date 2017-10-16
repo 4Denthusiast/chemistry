@@ -17,14 +17,15 @@ module Orbital(
 ) where
 
 import Dual
-import Data.List (dropWhileEnd)
+import Data.List
 import Data.Bifunctor (first)
 import Data.Bits.Floating.Ulp
 
 import Debug.Trace
+traceShow1 :: Show a => a -> b -> b
 traceShow1 = const id
 
-type Potential = [Double]
+type Potential = ([Double], [Double]) -- The first list is the actual potential. The second if for the exchange energy, which can't be described simply as a potential.
 type Grid = [Double] -- radius sampling points
 type DOrbital = [(DDouble, DDouble)]
 type Orbital = [Double]
@@ -39,18 +40,18 @@ logGrid spacing z = iterate (* (1 + spacing)) (log (slimConstant/coulumb'sConsta
 
 -- The effective potential purely from nuclear charge and angular momentum
 basePotential :: Grid -> Double -> Double -> Potential
-basePotential grid l charge = map (\r -> l*(l+2) * r^^(-2) + coulumbForce r) grid
+basePotential grid l charge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce r) grid, repeat 0)
     where coulumbForce r = charge * (-coulumb'sConstant + slimConstant / exp r) / (r*r)
 
 coulumb'sConstant, slimConstant :: Double
-coulumb'sConstant = 1
-slimConstant = 7
+coulumb'sConstant = 0.5
+slimConstant = 4
 
 -- Calculates the orbital with the fixed energy value.
 singleOrbital :: Grid -> Potential -> Energy -> DOrbital
-singleOrbital rs vs e = scanl progress (0, 1) (zip3 rs (zipWith (-) (tail rs) rs) vs)
-    where progress (ψ, dψ) (r, dr, v) = (ψ', dψ')
-              where ddψ = ((dual v) - (Dual e 1))*ψ*2 - 3/(dual r) * dψ
+singleOrbital rs (vs,xs) e = scanl progress (0, 1) (zip4 rs (zipWith (-) (tail rs) rs) vs xs)
+    where progress (ψ, dψ) (r, dr, v, x) = (ψ', dψ')
+              where ddψ = ((dual v) - (Dual e 1))*ψ*2 - (dual x)*2 - 3/(dual r) * dψ
                     dψ' = (dual dr) * ddψ  + dψ
                     ψ'  = (dual dr) *  dψ' +  ψ
 
@@ -58,7 +59,7 @@ trimmedOrbital :: Grid -> Potential -> Energy -> DOrbital
 trimmedOrbital rs vs e = trimOrbital rs vs $ singleOrbital rs vs e
 
 trimOrbital :: Grid -> Potential -> DOrbital -> DOrbital
-trimOrbital rs vs = map snd . trim3 . trim2 . trim1 . zip rs
+trimOrbital rs (vs,_) = map snd . trim3 . trim2 . trim1 . zip rs
     where trim1 rψs = takeWhile (\(r, (ψ, _)) -> abs (std ψ) * r < 3*threshold rψs) rψs
           thresholdPoint = (2*) $ snd $ head $ filter (\(v, r) -> v < 0 || r > 8) $ zip vs rs
           threshold = maximum . map (\(r, (ψ, _)) -> abs (std ψ) * r) . takeWhile ((< thresholdPoint) . fst)

@@ -22,14 +22,16 @@ module Atom(
 import Orbital
 import AtomEnergy
 import Utils
+
 import Data.List
 import qualified Data.Set as S
 import Data.Function
 import Data.Maybe
+import Data.Bifunctor (first)
 import Debug.Trace
 
 
-angularMomentumLabels = "spdfghi" ++ ['k'..'z'] ++ repeat 'R' -- "R" for "Rydberg".
+angularMomentumLabels = "spdfghi" ++ (['k'..'z'] \\ "sp") ++ repeat 'R' -- "R" for "Rydberg".
 
 data Atom = Atom
     {
@@ -37,7 +39,8 @@ data Atom = Atom
         charge :: Int,
         energies :: [[Energy]],
         orbitals :: [[Orbital]],
-        shieldingPotentials :: [[Potential]],
+        totalPotential :: [Double], --doesn't include the nuclear potential.
+        shieldingPotentials :: [[[Double]]], --used to exclude each electron's self-shielding. TODO: try just using the exchange terms for this: it is equivalent after convergence (not before), and doing so would simplify some things considerably.
         atomGrid :: Grid,
         prevOccs :: [[Double]],
         forcedEA :: Maybe [(N, L, Int)] --a value of Nothing represents that the electron arrangement should be determined from energies.
@@ -61,7 +64,7 @@ incorrectCharge :: Atom -> Int
 incorrectCharge atom = electronsRequired atom - sum (map þrd3 $ electronArrangement atom)
 
 emptyAtom :: Int -> Int -> Atom
-emptyAtom z c = Atom z c empty empty empty (logGrid 0.01 (fromIntegral z)) [] Nothing
+emptyAtom z c = Atom z c empty empty (repeat 0) empty (logGrid 0.01 (fromIntegral z)) [] Nothing
     where empty = repeat []
 
 -- If the atomic numbers are similar, this should converge faster than starting from empty.
@@ -129,7 +132,7 @@ addOrbitalAt atom l = atom
     where n  = 1 + length (energies atom !! l)
           (e, o, p) = genOrbitalAt atom 0.5 n l (-1)
 
-genOrbitalAt :: Atom -> Double -> N -> L -> Energy -> (Energy, Orbital, Potential)
+genOrbitalAt :: Atom -> Double -> N -> L -> Energy -> (Energy, Orbital, [Double])
 genOrbitalAt atom smooth n l e0 = (e, o, p)
     where rs = atomGrid atom
           vs = getPotential atom n l Nothing
@@ -144,12 +147,14 @@ updateAtom small smooth atom = (if small then id else fillAtom) $ let
         es = maybe id (zipWith take . occupations') (if small then forcedEA atom else Nothing) (energies'' atom)
         (es', ψs', vs') = unzip3 $ map unzip3 $ zipWith (zipWith $ uncurry $ genOrbitalAt atom smooth) indices es
         lerp x a b = if abs (a-b) < 0.05 then b else b*x + a*(1-x)
+        os' = zipWith (zipWith (lerp smooth)) (prevOccs' atom) $ map (map (fromIntegral . þrd3) . sort) $ groupBy (on (==) snd3) $ sortBy (on compare snd3) $ electronArrangement atom
     in atom
         {
             energies = es' ++ repeat [],
             orbitals = ψs' ++ repeat [],
             shieldingPotentials = vs' ++ repeat [],
-            prevOccs = zipWith (zipWith (lerp smooth)) (prevOccs' atom) $ map (map (fromIntegral . þrd3) . sort) $ groupBy (on (==) snd3) $ sortBy (on compare snd3) $ electronArrangement atom
+            prevOccs = os',
+            totalPotential = foldr (zipWith (+)) (repeat 0) $ concat $ zipWith (zipWith (map . (*))) os' vs'
         }
 
 updateAtomUntilConvergence :: Atom -> Atom
@@ -166,7 +171,7 @@ atomsSimilar a0 a1 = prevOccs a0 == prevOccs a1 &&
     where similarEnergies e0 e1 occupied = (not occupied && e0<1e-8 && e1==0) || abs (e0-e1) <= min 0.001 (0.01*abs (e0+e1))
           boolOccs = map ((++ repeat False) . flip replicate True) (occupations a0) ++ repeat (repeat False)
 
-genShieldingPotential :: Grid -> Orbital -> Potential
+genShieldingPotential :: Grid -> Orbital -> [Double]
 genShieldingPotential rs ψs = map (* coulumb'sConstant) $ zipWith (+) vOut vIn
     where d     = zipWith3 (\ψ r r' -> ψ^2 * r^3 * (r' - r)) ψs rs (tail rs)
           invSq = zipWith (\r x -> x/(r^2)) rs
@@ -174,18 +179,16 @@ genShieldingPotential rs ψs = map (* coulumb'sConstant) $ zipWith (+) vOut vIn
           vIn   = invSq $ scanl (+) 0 d ++ repeat 1
 
 getPotential :: Atom -> N -> L -> Maybe Spin -> Potential
-getPotential atom n0 l0 s0 = zipWith (+) baseV (getShieldingPotential atom n0 l0 s0)
+getPotential atom n0 l0 s0 = first (zipWith (+) $ fst baseV) (getShieldingPotential atom n0 l0 s0)
     where rs    = atomGrid atom
           z     = atomicNumber atom
           baseV = basePotential rs (fromIntegral l0) (fromIntegral z)
 
 getShieldingPotential :: Atom -> N -> L -> Maybe Spin -> Potential
-getShieldingPotential atom n0 l0 s0 = if length (orbitals atom !! l0) < n0 then repeat 0 else foldr (zipWith (+)) (repeat 0) scaledVs
+getShieldingPotential atom n0 l0 s0 = (vs, xs)
     where arr       = concat $ zipWith (zipWith (uncurry (,,))) indices $ prevOccs atom
           occ0'     = þrd3 <$> find (\(n,l,_) -> n == n0 && l == l0) arr
-          occ0      = maybe 1 id occ0'
-          errQ      = fromIntegral (electronsRequired atom) - sum (map þrd3 arr)
-          arr'      = if isJust occ0' || errQ /= 0 then arr else init arr ++ [let (n, l, o) = last arr in (n,l,o-1), (n0, l0, 1)] --For unoccupied orbitals, the calculated energy should be what the energy would be if they were occupied.
+          occ0      = maybe 0 id occ0'
           zeroEnergy= (((energies atom !! l0) ++ repeat 0) !! (n0-1)) == 0
           upOcc0    = case s0 of
                           Just Up   -> occ0
@@ -193,13 +196,21 @@ getShieldingPotential atom n0 l0 s0 = if length (orbitals atom !! l0) < n0 then 
                           Nothing   -> min occ0 $ fromIntegral (l0 + 1)^2
           ψs0       = orbitals atom !! l0 !! (n0-1)
           rs        = atomGrid atom
-          orbOverlap n l = if zeroEnergy then 0 else
-              (/fromIntegral (l+l0+1)) $ sum $ zipWith4 (\r r' ψ0 ψ1 -> abs (r*r*r*(r'-r)*ψ0*ψ1)) rs (tail rs) ψs0 $ orbitals atom !! l !! (n-1)
-          occ n l o = if n == n0 && l == l0 
-              then upOcc0*(occ0-upOcc0)/occ0 + max 0 (occ0 - 1)/2
-              else o - orbOverlap n l * (o - o/occ0 * upOcc0 + (2*upOcc0/occ0 - 1) * min o (fromIntegral (l+1)^2))
-          scaledVs  = map (\(n,l,o) -> map (* occ n l o) (shieldingPotentials atom !! l !! (n-1))) arr
--- Ideally, the exchange energy should be the integral as x1 and x2 range over the 4D space of ψ1ψ2(x1) ψ1ψ2(x2) (x1-x2)^-2, while the plain repulsion term is  ψ1ψ1(x1) ψ2ψ2(x2) (x1-x2)^-2. I've very crudely approximated the ratio of these terms in orbOverlap, as I currently can't be bothered doing it better.
+          xch n l o = let
+                  ψs = (orbitals atom !! l !! (n-1))
+                  orbOverlap = zipWith4 (\r r' ψ0 ψ -> (r'-r)*ψ*ψ0*r^3) rs (tail rs) ψs0 ψs
+                  dl = abs (l-l0) -- The lowest term with non-zero coefficient
+                  bias i = zipWith (*) (map (^^i) rs)
+                  inner = bias   dl    $ scanr (+) 0 $ bias (-dl-2) orbOverlap
+                  outer = bias (-dl-2) $ scanl (+) 0 $ bias   dl    orbOverlap
+                  o' = xchOcc n l o
+              in zipWith3 (\ψ inn out -> o'*ψ*(inn+out)/fromIntegral ((l+1)*(l0+1))) ψs inner outer ++ repeat 0
+          xchOcc n l o
+              | isNothing occ0'    = min o (fromIntegral (l+1)^2)
+              | n == n0 && l == l0 = 2*upOcc0^2 / occ0 + occ0 - 2*upOcc0 - 1
+              | otherwise          = ((occ0 - upOcc0)*o + (2*upOcc0 - occ0) * min o (fromIntegral (l+1)^2))/occ0
+          vs        = (if zeroEnergy then id else zipWith (flip (-)) (shieldingPotentials atom !! l0 !! (n0-1))) $ totalPotential atom
+          xs        = foldr (zipWith (+)) (repeat 0) $ if zeroEnergy then [] else map (uncurry3 xch) arr
 
 
 appendAt :: Int -> a -> [[a]] -> [[a]]

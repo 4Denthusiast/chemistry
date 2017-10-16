@@ -14,7 +14,8 @@ data Atom = Atom
         charge :: Int,
         energies :: [[Energy]],
         orbitals :: [[Orbital]],
-        shieldingPotentials :: [[Potential]],
+        totalPotential :: [Double],
+        shieldingPotentials :: [[[Double]]],
         atomGrid :: Grid,
         prevOccs :: [[Double]],
         forcedEA :: Maybe [(N, L, Int)]

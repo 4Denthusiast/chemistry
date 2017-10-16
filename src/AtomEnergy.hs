@@ -8,6 +8,7 @@ module AtomEnergy(
 
 import {-# SOURCE #-} Atom
 import Orbital
+import Utils
 
 import Data.List
 
@@ -32,7 +33,7 @@ nuclearEnergy atom (n, l, _, o) = fromIntegral o * sum (zipWith4 (\r r' hψ ψ -
 
 oneElectronHamiltonian :: Grid -> Int -> L -> Orbital -> Orbital
 oneElectronHamiltonian rs z l ψs = zipWith (+) potentialTerm laplacianTerm
-    where vs            = basePotential rs (fromIntegral l) (fromIntegral z)
+    where vs            = fst $ basePotential rs (fromIntegral l) (fromIntegral z)
           potentialTerm = zipWith (*) vs ψs
           rds           = zipWith (-) (tail rs) rs
           dup (x:xs)    = x:x:xs
@@ -53,9 +54,9 @@ eeEnergy atom (n0, l0, s0, o0) (n1, l1, s1, o1) = coulumb'sConstant * sum (zipWi
           coulumb01 = zipWith (*) ψs00 $ zipWith (\r q -> q/(r*r)) rs $ scanl (+) 0 $ zipWith3 (\r r' d -> r*r*r*(r'-r)*d) rs (tail rs) ψs11
           coulumb10 = zipWith (*) ψs11 $ zipWith (\r q -> q/(r*r)) rs $ scanl (+) 0 $ zipWith3 (\r r' d -> r*r*r*(r'-r)*d) rs (tail rs) ψs00
           coulumbTerm = map (* ifDiag (o0'*(o1'-1)/2) (o0'*o1')) $ zipWith (+) coulumb01 coulumb10
-          l    = l0 + l1
-          exchange = zipWith (*) ψs01 $ zipWith (\r q -> q/(r*r*r^l)) rs $ scanl (+) 0 $ zipWith3 (\r r' d -> r*r*r*r^l*(r'-r)*d) rs (tail rs) ψs01
-          exchangeTerm = if s0 /= s1 then repeat 0 else map (* ((o0'*o1' - ifDiag o0' 0)*ifDiag 1 2/(fromIntegral l + 1))) exchange
+          ls    = [l0 + l1, l0 + l1 - 2 .. abs (l0 - l1)]
+          exchange l = zipWith (*) ψs01 $ zipWith (\r q -> q/(r*r*r^l)) rs $ scanl (+) 0 $ zipWith3 (\r r' d -> r*r*r*r^l*(r'-r)*d) rs (tail rs) ψs01
+          exchangeTerm = if s0 /= s1 then repeat 0 else map (* ((o0'*o1' - ifDiag o0' 0)*ifDiag 1 2/(fromIntegral ((l0+1)*(l1+1))))) $ map sum $ transpose $ map exchange ls
 
 orbitalEnergy :: Atom -> (N, L, Spin) -> Energy
 orbitalEnergy atom (n, l, s) = nuclearEnergy atom (n, l, s, 1)
@@ -63,8 +64,6 @@ orbitalEnergy atom (n, l, s) = nuclearEnergy atom (n, l, s, 1)
 
 carefulEnergies :: Atom -> [[[Energy]]]
 carefulEnergies atom = map3 (orbitalEnergy atom) $ map3 (\(n,l,s,o) -> (n,l,s)) $ map2 splitSpin $ zipWith3 (zipWith3 (\e (n,l) o -> (n,l,round o))) (energies' atom) indices (map (++ repeat 0) (prevOccs atom) ++ repeat (repeat 0))
-    where map2 = map . map
-          map3 = map . map2
 
 approxOrbitalEnergy :: Atom -> (N, L, Spin) -> Energy
 approxOrbitalEnergy atom (n, l, s) = ((energies atom !! l) ++ repeat 0) !! (n-1)

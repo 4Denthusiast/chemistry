@@ -15,7 +15,9 @@ module Polynomial(
     CPoly1,
     toHopfBasis, fromHopfBasis,
     sphericalIntegral,
-    conjPoly4
+    conjPoly4,
+    poly4Norm,
+    assumePolyReal
 ) where
 
 import Utils
@@ -70,7 +72,7 @@ evaluate xs (Polynomial ms) = sum (map evaluateMonomial ms)
 
 substitute :: (Eq a, Num a, KnownNat n, KnownNat m) => [Polynomial n a] -> Polynomial m a -> Polynomial n a
 substitute xs (Polynomial ms) = evaluate xs (Polynomial ms')
-    where ms' = map (\(Monomial a es) -> Monomial (constant a) es) ms
+    where ms' = map (fmap constant) ms
 
 laplacian :: (KnownNat n, Eq a, Num a) => Polynomial n a -> Polynomial n a
 laplacian (Polynomial ms) = sum $ map monLap ms
@@ -103,6 +105,14 @@ binomial a b
 conjPoly4 :: CPoly4 -> CPoly4
 conjPoly4 (Polynomial ms) = Polynomial $ map conj ms
     where conj (Monomial a [x, y, z, w]) = Monomial (conjugate a) [y, x, w, z]
+
+poly4Norm :: CPoly4 -> Polynomial 1 Double
+poly4Norm p = assumePolyReal $ sphericalIntegral $ p * conjPoly4 p
+
+assumePolyReal :: (Eq a, Num a) => Polynomial n (Complex a) -> Polynomial n a
+assumePolyReal (Polynomial ms) = Polynomial $ map (fmap assumeReal) ms
+    where assumeReal (x :+ 0) = x
+          assumeReal _        = error "Real number required."
 
 
 class NamedDimensions (n :: Nat) where

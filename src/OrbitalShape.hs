@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds           #-}
 module OrbitalShape(
     asymptoticChart
 ) where
@@ -5,8 +6,11 @@ module OrbitalShape(
 import Polynomial
 import Orbital
 import Atom
+import Utils
+
 import Data.Complex
 import Data.List
+import Data.Function
 
 normalise :: CPoly4 -> CPoly4
 normalise p = (p *) $ constant $ recip $ sqrt $ evaluate [1] $ sphericalIntegral $ p * conjPoly4 p
@@ -21,6 +25,25 @@ orbitalShape l m1 m2 = normalise $ (*angle) $ sum $ zipWith3 ((.) (*) . (*)) xys
           angle = (variable (if m1 > 0 then 1 else 0))^m1' * (variable (if m2 > 0 then 3 else 2))^m2'
           xys = iterate (* (variable 0 * variable 1)) 1
           wzs = reverse $ take (l'+1) $ iterate (* (variable 2 * variable 3)) 1
+
+orbitalShapes :: L -> [CPoly4]
+orbitalShapes l = uncurry (orbitalShape l) <$> [(m-m', m+m'-l) | m <- [0..l], m' <- [0..l]]
+
+decompose :: CPoly4 -> [[Complex Double]]
+decompose p = map2 (evaluate [1] . sphericalIntegral . (*p) . conjPoly4) $ map orbitalShapes [0..degree p]
+
+-- In this case, the polynomials are densities, not just wavefunctions.
+multipoleInteraction :: CPoly4 -> CPoly4 -> CPoly1
+multipoleInteraction p p' = toPoly $ map sum $ on (zipWith3 (zipWith3 (((*) .) . (*))) normFactors) decompose p p'
+    where toPoly = sum . zipWith (*) (iterate (*variable 0) 1) . map constant
+          normFactors = map (repeat . (*(2*pi^2)) . recip . fromIntegral . (+1)) [0..]
+
+-- Possible I ought to exclude the case where the orbitals are the same, but that makes the coulumb term be not just constant 1, which makes it more complicated. averageExchangeEnergy turns out to be 1/((l+1)(l'+1)) sum r^i from i=abs(l-l') to l+l' in steps of 2.
+averageCoulumbCoefficient, averageExchangeCoefficient :: L -> L -> Polynomial 1 Double
+[averageCoulumbCoefficient, averageExchangeCoefficient] = map averageCoefficient [\(a,b) -> (a *~ a,b *~ b),\(a,b) -> (a *~ b, a *~ b)] 
+    where averageCoefficient combine l l' = average $ map (assumePolyReal . uncurry multipoleInteraction . combine) $ (,) <$> orbitalShapes l <*> orbitalShapes l'
+          average ps = sum ps * (constant $ recip $ fromIntegral $ length ps)
+          (*~) = (*) . conjPoly4
 
 exponential :: Double -> Double -> CPoly4
 exponential a r = toHopfBasis $ sum $ take n terms
@@ -68,7 +91,7 @@ asymOverlap :: Atom -> N -> L -> Atom -> N -> L -> L -> L -> (Double, Double, Do
 asymOverlap atm0 n0 l0 atm1 n1 l1 m1 m2 = (a, integrate ov, integrate (zipWith (*) ov vs))
     where (a, ov)   = asymptoticOverlap atm0 n0 l0 atm1 n1 l1 m1 m2
           rs        = atomGrid atm1
-          vs        = map (min 0) $ getPotential atm1 n1 l1 Nothing -- Exclude the negative part as (to a crude approximation), the other orbital will be repelled and won't penetrate. It will have additional kinetic energy from this, but that's ignored.
+          vs        = map (min 0) $ fst $ getPotential atm1 n1 l1 Nothing -- Exclude the negative part as (to a crude approximation), the other orbital will be repelled and won't penetrate. It will have additional kinetic energy from this, but that's ignored. The exchange energy is negligible as separation->infinity.
           integrate = trimSum 0 0 0 . zipWith3 (\r r' x -> r^3*x*(r'-r)) rs (tail rs)
           trimSum s m a [] = s
           trimSum s m a (x:xs) = let a' = a + 0.03*(abs x - a)

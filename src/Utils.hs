@@ -3,7 +3,10 @@ module Utils(
     snd3,
     þrd3,
     frþ4,
-    mergeBy
+    mergeBy,
+    uncurry3,
+    map2,
+    map3,
 ) where
 
 fst3 :: (a, b, c) -> a
@@ -26,3 +29,11 @@ mergeBy f = mergeBy' []
           mergeInto (y:ys) x = case f y x of
               Just y' -> y':ys
               Nothing -> y: mergeInto ys x
+
+uncurry3 :: (a -> b -> c -> d) -> (a,b,c) -> d
+uncurry3 f (a,b,c) = f a b c
+
+map2 :: (a -> b) -> [[a]] -> [[b]]
+map2 = map . map
+map3 :: (a -> b) -> [[[a]]] -> [[[b]]]
+map3 = map . map2
