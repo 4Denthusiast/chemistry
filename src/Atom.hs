@@ -244,10 +244,7 @@ atomAdjEAs :: Atom -> [[(N, L, Int)]]
 atomAdjEAs atom = adjacentElectronArrangements (electronArrangement atom) (electronsRequired atom)
 
 adjacentElectronArrangements :: [(N, L, Int)] -> Int -> [[(N, L, Int)]]
-adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . þrd3)) $ case signum errCharge of
-        -1 -> positiveOthers ++ others
-        0  -> others
-        1  -> negativeOthers ++ veryNegativeOthers ++ others
+adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . þrd3)) $ (if errCharge > 0 then veryNegativeOthers ++ negativeOthers else []) ++ others ++ positiveOthers
     where eaByL = groupBy (on (==) snd3) $ sortOn snd3 ea
           maxL  = snd3 $ head $ last $ [(1,-1,0)] : eaByL
           nextL [] _ = ([], [])
@@ -258,13 +255,15 @@ adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . 
           newOrbs = flip (zipWith (,,0)) [0..] $ map ((+1) . fst3 . last . ((0,0,0):)) eaByL'
           additionFrontier = unionBy (on (==) snd3) (filter (\(n,l,o) -> o < 2*(l+1)^2) ea) newOrbs
           removalFrontier  = mergeBy (\x0@(_,l0,_) x1@(_,l1,_) -> if l0 == l1 then Just (max x0 x1) else Nothing) ea
-          modifiedEAs (na,la,oa) (nr,lr,or) = valid >> (flip (++) ea' <$> newXs)
+          modifiedEAs (na,la,oa) (nr,lr,or) = valid >> (flip (++) ea' <$> (newXs ++ discarding))
               where steps l = (*(l+1)^2) <$> [0,1,2]
                     oa' = filter (>0) $ map (+(-oa)) $ steps la
                     or' = filter (>0) $ map (or-   ) $ steps lr
                     o'  = filter (<= min (maximum oa') (maximum or')) $ union oa' or'
                     ea' = ea \\ [(na,la,oa),(nr,lr,or)]
                     newXs = (\o -> [(na,la,oa+o), (nr,lr,or-o)]) <$> o'
+                    lla = 2*(la+1)^2
+                    discarding = if lla < oa + or then [[(na,la,lla)]] else []
                     valid = if la >= lr && na >= nr then [] else [()]
           others = concat $ modifiedEAs <$> additionFrontier <*> removalFrontier
           chargedEA o' (na,la,oa) = (na,la,oa+o') : (delete (na,la,oa) ea)
@@ -285,8 +284,9 @@ relaxAtom atom = relax' atom' S.empty
     where atom' = updateAtomUntilConvergence $ forceEA atom (electronArrangement atom)
           relax' bestA triedEAs = case as of {[] -> bestA; (bestA':_) -> relax' bestA' triedEAs'}
               where nextEAs = filter (flip S.notMember triedEAs) $ atomAdjEAs bestA
-                    nextAtomInits = sortOn totalEnergy $ map (forceEA $ updateAtom False 0.5 bestA) nextEAs
+                    nextAtomInits = sortOn (\a -> (abs $ forcedIncorrectCharge a, totalEnergy a)) $ map (forceEA $ updateAtom False 0.5 bestA) nextEAs
                     nextAtoms = map updateAtomUntilConvergence nextAtomInits
                     (failedAtoms, as) = span (not . better) nextAtoms
-                    better a = correctEA a && on (<) (\a' -> (abs (incorrectCharge a'), totalEnergy a')) a bestA
+                    better a = correctEA a && on (<) (\a' -> (max 0 (-incorrectCharge a'), totalEnergy a')) a bestA
                     triedEAs' = S.union triedEAs $ S.fromList $ map (fromJust . forcedEA) $ bestA : failedAtoms
+                    forcedIncorrectCharge a = electronsRequired a - sum (map þrd3 $ fromJust $ forcedEA a)
