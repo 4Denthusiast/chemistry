@@ -43,7 +43,8 @@ data Atom = Atom
         shieldingPotentials :: [[[Double]]], --used to exclude each electron's self-shielding. TODO: try just using the exchange terms for this: it is equivalent after convergence (not before), and doing so would simplify some things considerably.
         atomGrid :: Grid,
         prevOccs :: [[Double]],
-        forcedEA :: Maybe [(N, L, Int)] --a value of Nothing represents that the electron arrangement should be determined from energies.
+        forcedEA :: Maybe [(N, L, Int)], --a value of Nothing represents that the electron arrangement should be determined from energies.
+        prevAtom :: Maybe Atom
     }
 
 
@@ -64,7 +65,7 @@ incorrectCharge :: Atom -> Int
 incorrectCharge atom = electronsRequired atom - sum (map þrd3 $ electronArrangement atom)
 
 emptyAtom :: Int -> Int -> Atom
-emptyAtom z c = Atom z c empty empty (repeat 0) empty (logGrid 0.01 (fromIntegral z)) [] Nothing
+emptyAtom z c = Atom z c empty empty (repeat 0) empty (logGrid 0.01 (fromIntegral z)) [] Nothing Nothing
     where empty = repeat []
 
 -- If the atomic numbers are similar, this should converge faster than starting from empty.
@@ -154,7 +155,8 @@ updateAtom small smooth atom = (if small then id else fillAtom) $ let
             orbitals = ψs' ++ repeat [],
             shieldingPotentials = vs' ++ repeat [],
             prevOccs = os',
-            totalPotential = foldr (zipWith (+)) (repeat 0) $ concat $ zipWith (zipWith (map . (*))) os' vs'
+            totalPotential = foldr (zipWith (+)) (repeat 0) $ concat $ zipWith (zipWith (map . (*))) os' vs',
+            prevAtom = Just atom
         }
 
 updateAtomUntilConvergence :: Atom -> Atom
@@ -170,6 +172,21 @@ atomsSimilar a0 a1 = prevOccs a0 == prevOccs a1 &&
                      (all (all id) $ zipWith3 (zipWith3 similarEnergies) (energies' a0) (energies' a1) boolOccs)
     where similarEnergies e0 e1 occupied = (not occupied && e0<1e-8 && e1==0) || abs (e0-e1) <= min 0.001 (0.01*abs (e0+e1))
           boolOccs = map ((++ repeat False) . flip replicate True) (occupations a0) ++ repeat (repeat False)
+
+-- Given that f(xi)=yi, estimate an x such that (lerp x y1 y2) is a fixed point of f, assuming it's linear.
+linearFix x1 y1 x2 y2 = max 0 $ min 1 $ (a-y1)/(y2-y1)
+    where a = (x1*y2 + y1*x2)/(x1-y1-x2+y2)
+
+-- If the input atoms have the same parameters, generate one that is a mixture suitable for another iteration of updateAtom, and which will converge quicker, by using, for each orbital, the difference in its energy between the the atom's predecessor and the atom itself.
+mixAtoms :: Atom -> Atom -> Atom
+mixAtoms a1 a2 = case (prevAtom a1, prevAtom a2) of
+        (Just a1', Just a2') -> let
+                xs = 
+            in a2{
+                energies = zipWith3 (zipWith3 lerp) xs (energies a1) (energies a2)
+                
+            }
+        _ -> a2
 
 genShieldingPotential :: Grid -> Orbital -> [Double]
 genShieldingPotential rs ψs = map (* coulumb'sConstant) $ zipWith (+) vOut vIn

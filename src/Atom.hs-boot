@@ -18,7 +18,8 @@ data Atom = Atom
         shieldingPotentials :: [[[Double]]],
         atomGrid :: Grid,
         prevOccs :: [[Double]],
-        forcedEA :: Maybe [(N, L, Int)]
+        forcedEA :: Maybe [(N, L, Int)],
+        prevAtom :: Maybe Atom
     }
 
 energies' :: Atom -> [[Energy]]
