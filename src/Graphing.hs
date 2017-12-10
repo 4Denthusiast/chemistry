@@ -18,7 +18,7 @@ graphAtom atom = toFile def ("charts/" ++ show (atomicNumber atom) ++ ".svg") $ 
     layout_x_axis . laxis_generate .= autoScaledLogAxis (LogAxisParams (map show))
     mapM_
         (\(l, ψs) -> plot (line [l] $ map (denormalize . zip (atomGrid atom) . take 1500) ψs))
-        (zip angularMomentumLabels $ zipWith take (occupations atom) (orbitals atom))
+        (zip angularMomentumLabels $ poToList $ trimPO $ (\occ orb -> if occ>0 then orb else []) <$> (occupations atom) <*> (orbitals atom))
         --(zip angularMomentumLabels $ takeWhile (not . null) (orbitals atom))
         --(zip angularMomentumLabels $ takeWhile (not . null) $ take 1 $ (orbitals atom))
 

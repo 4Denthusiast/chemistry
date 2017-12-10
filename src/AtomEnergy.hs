@@ -29,7 +29,7 @@ nuclearEnergy :: Atom -> (N, L, Spin, Int) -> Energy
 nuclearEnergy atom (n, l, _, o) = fromIntegral o * sum (zipWith4 (\r r' hψ ψ -> r*r*r*(r'-r)*hψ*ψ) rs (tail rs) (oneElectronHamiltonian rs z l ψs) ψs)
     where rs = atomGrid atom
           z  = atomicNumber atom
-          ψs = orbitals atom !! l !! (n-1)
+          ψs = getPO (orbitals atom) n l
 
 oneElectronHamiltonian :: Grid -> Int -> L -> Orbital -> Orbital
 oneElectronHamiltonian rs z l ψs = zipWith (+) potentialTerm laplacianTerm
@@ -46,8 +46,8 @@ eeEnergy atom (n0, l0, s0, o0) (n1, l1, s1, o1) = coulumb'sConstant * sum (zipWi
     where rs   = atomGrid atom
           ifDiag a b = if n0 == n1 && l0 == l1 && s0 == s1 then a else b
           (o0', o1') = (fromIntegral o0, fromIntegral o1)
-          ψs0  = orbitals atom !! l0 !! (n0-1)
-          ψs1  = orbitals atom !! l1 !! (n1-1)
+          ψs0  = getPO (orbitals atom) n0 l0
+          ψs1  = getPO (orbitals atom) n1 l1
           ψs00 = zipWith (*) ψs0 ψs0
           ψs01 = zipWith (*) ψs0 ψs1
           ψs11 = zipWith (*) ψs1 ψs1
@@ -60,10 +60,10 @@ eeEnergy atom (n0, l0, s0, o0) (n1, l1, s1, o1) = coulumb'sConstant * sum (zipWi
 
 orbitalEnergy :: Atom -> (N, L, Spin) -> Energy
 orbitalEnergy atom (n, l, s) = nuclearEnergy atom (n, l, s, 1)
-    + sum (map (eeEnergy atom (n,l,s,1)) $ concatMap splitSpin $ prevElectronArrangement atom)
+    + sum (map (eeEnergy atom (n,l,s,1)) $ concatMap splitSpin $ electronArrangement atom)
 
-carefulEnergies :: Atom -> [[[Energy]]]
-carefulEnergies atom = map3 (orbitalEnergy atom) $ map3 (\(n,l,s,o) -> (n,l,s)) $ map2 splitSpin $ zipWith3 (zipWith3 (\e (n,l) o -> (n,l,round o))) (energies' atom) indices (map (++ repeat 0) (prevOccs atom) ++ repeat (repeat 0))
+carefulEnergies :: Atom -> PerOrbital [Energy]
+carefulEnergies atom = map (orbitalEnergy atom . \(n,l,s,o)->(n,l,s)) <$> splitSpin <$> (maybe (const (0,0,0)) (uncurry (,,)) <$> indices <*> (round <$> occupations atom))
 
 approxOrbitalEnergy :: Atom -> (N, L, Spin) -> Energy
-approxOrbitalEnergy atom (n, l, s) = ((energies atom !! l) ++ repeat 0) !! (n-1)
+approxOrbitalEnergy atom (n, l, s) = getPO (energies atom) n l

@@ -1,22 +1,25 @@
 {-# LANGUAGE TupleSections #-}
 
 module Atom(
+    PerOrbital(..),
     Atom(..),
+    AtomCache(..),
+    getPO,
+    trimPO,
+    poToList,
+    indices,
     emptyAtom,
     makeAtom,
+    electronsRequired,
+    incorrectCharge,
     updateAtom,
-    energies',
     getPotential,
     electronArrangement,
-    prevElectronArrangement,
     prettyElectronArrangement,
     angularMomentumLabels,
-    occupations,
     aperiodicTable,
     anionise,
-    cationise,
-    atomFull,
-    indices
+    cationise
 ) where
 
 import Orbital
@@ -24,198 +27,134 @@ import AtomEnergy
 import Utils
 
 import Data.List
+import Control.Applicative
 import qualified Data.Set as S
 import Data.Function
 import Data.Maybe
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, second)
 import Debug.Trace
 
 
 angularMomentumLabels = "spdfghi" ++ (['k'..'z'] \\ "sp") ++ repeat 'R' -- "R" for "Rydberg".
 
+data PerOrbital a = PerOrbital a [[a]]
+
+instance Functor PerOrbital where
+    fmap f (PerOrbital r xss) = PerOrbital (f r) (map (map f) xss)
+instance Foldable PerOrbital where -- This instance is only appropriate where p == (PerOrbital z _).
+    foldr f z p = foldr f z (concat $ poToList p)
+instance Applicative PerOrbital where
+    pure = emptyPO
+    (PerOrbital r xss) <*> (PerOrbital r' xss') = PerOrbital (r r') (zipWithDefault (zipWithDefault id r r') [] [] xss xss')
+        where zipWithDefault g d d' [] xs = map (     g d ) xs
+              zipWithDefault g d d' xs [] = map (flip g d') xs
+              zipWithDefault g d d' (x:xs) (x':xs') = g x x' : zipWithDefault g d d' xs xs'
+liftPO2Short :: (a -> b -> c) -> PerOrbital a -> PerOrbital b -> PerOrbital c
+liftPO2Short f (PerOrbital r xss) (PerOrbital r' xss') = PerOrbital (f r r') $ zipWith (zipWith f) xss xss'
+instance (Show a) => Show (PerOrbital a) where
+    show (PerOrbital _ xss) = (++"]") $ unlines $ ("[":) $ zipWith (\l xs -> l : ": " ++ show xs) angularMomentumLabels xss
+instance (Eq a) => Eq (PerOrbital a) where
+    p == p' = let (PerOrbital r x, PerOrbital r' x') = (trimPO p, trimPO p') in r == r' && x == x'
+
+getPO :: PerOrbital a -> N -> L -> a
+getPO (PerOrbital r xss) n l = case (drop l xss) of
+    []     -> r
+    (xs:_) -> case (drop (n-1) xs) of
+        []    -> r
+        (x:_) -> x
+
+emptyPO :: a -> PerOrbital a
+emptyPO x = PerOrbital x []
+
+poToList :: PerOrbital a -> [[a]]
+poToList (PerOrbital _ xss) = xss
+
+trimPO :: Eq a => PerOrbital a -> PerOrbital a
+trimPO (PerOrbital r xss) = PerOrbital r $ dropWhileEnd null $ map (dropWhileEnd (r ==)) xss
+
+untrimPO :: PerOrbital a -> PerOrbital a
+untrimPO (PerOrbital r xss) = PerOrbital r $ map (++[r]) xss ++ [[r]]
+
+indices :: PerOrbital (Maybe (N, L))
+indices = PerOrbital Nothing [[Just (n, l) | n <- [1..]] | l <- [0..]]
+
+
+
 data Atom = Atom
     {
         atomicNumber :: Int,
         charge :: Int,
-        energies :: [[Energy]],
-        orbitals :: [[Orbital]],
-        totalPotential :: [Double], --doesn't include the nuclear potential.
-        shieldingPotentials :: [[[Double]]], --used to exclude each electron's self-shielding. TODO: try just using the exchange terms for this: it is equivalent after convergence (not before), and doing so would simplify some things considerably.
         atomGrid :: Grid,
-        prevOccs :: [[Double]],
-        forcedEA :: Maybe [(N, L, Int)] --a value of Nothing represents that the electron arrangement should be determined from energies.
+        forcedOccs :: PerOrbital Int,
+        energies :: PerOrbital Energy,
+        orbitals :: PerOrbital Orbital,
+        occupations :: PerOrbital Double
     }
 
-
-energies' :: Atom -> [[Energy]]
-energies' = takeWhile (not . null) . energies
-
-energies'' :: Atom -> [[Energy]]
-energies'' atom = zipWith take (map (+ 1) occ) (energies atom)
-    where occ = occupations atom ++ [0]
-
-prevOccs' :: Atom -> [[Double]]
-prevOccs' = (++ repeat (repeat 0)) . map (++ repeat 0) . prevOccs
+data AtomCache = AtomCache
+    {
+        atomInCache :: Atom,
+        totalPotential :: [Double], --doesn't include the nuclear potential.
+        shieldingPotentials :: PerOrbital [Double] --used to exclude each electron's self-shielding. TODO: try just using the exchange terms for this: it is equivalent after convergence (not before), and doing so would simplify some things considerably.
+    }
 
 electronsRequired :: Atom -> Int
 electronsRequired atom = atomicNumber atom - charge atom
 
-incorrectCharge :: Atom -> Int
-incorrectCharge atom = electronsRequired atom - sum (map þrd3 $ electronArrangement atom)
+incorrectCharge :: Atom -> Double
+incorrectCharge atom = fromIntegral (electronsRequired atom) - sum (occupations atom)
 
 emptyAtom :: Int -> Int -> Atom
-emptyAtom z c = Atom z c empty empty (repeat 0) empty (logGrid 0.01 (fromIntegral z)) [] Nothing
-    where empty = repeat []
+emptyAtom z c = Atom z c (logGrid 0.01 (fromIntegral z)) (emptyPO 0) (emptyPO 0) (emptyPO (error "No default orbital")) (emptyPO 0)
 
 -- If the atomic numbers are similar, this should converge faster than starting from empty.
 copyAtom :: Atom -> Int -> Int -> Atom
-copyAtom atom z c = atom
-    {
+copyAtom atom z c = atom {
         atomicNumber = z,
-        charge       = c,
-        atomGrid     = logGrid 0.01 (fromIntegral z)
+        charge = c,
+        atomGrid = logGrid 0.01 (fromIntegral z)
     }
 
-makeAtom :: Int -> Int -> Atom
-makeAtom z c = relaxAtom $ emptyAtom z c
+copyAtom' :: Atom -> Int -> Int -> Atom
+copyAtom' atom z' c' = copyAtom atom (z' + atomicNumber atom) (c' + charge atom)
 
-fillAtom :: Atom -> Atom
-fillAtom atom = 
-    let
-        occ = occupations atom
-        done = (all (\(es, n) -> not $ null $ drop n es) $ zip (energies atom) occ)
-            && (length occ < length (energies' atom))
-    in
-        if done then atom else fillAtom $ addOrbital occ atom
+incrementAtom :: Atom -> Atom
+incrementAtom atom = relaxAtom $ copyAtom' atom 1 0
+
+cationise :: Atom -> Atom
+cationise atom = relaxAtom $ copyAtom' atom 0 1
+anionise  :: Atom -> Atom
+anionise  atom = relaxAtom $ copyAtom' atom 0 (-1)
+
+aperiodicTable :: [Atom]
+aperiodicTable = iterate incrementAtom (makeAtom 1 0)
+
+
+
+lOccupations :: AtomCache -> [Int]
+lOccupations atom = map (length . dropWhileEnd (==0)) $ poToList $ occupations $ atomInCache atom
 
 electronArrangement :: Atom -> [(N, L, Int)]
-electronArrangement atom = maybe ea trimEA $ forcedEA atom
-    where spareElectrons = electronsRequired atom
-          ea = mergeSpins $
-               takeWhile ((>0) . þrd3) $
-               snd $ mapAccumL (\a (n,l,ll) -> (a-min a ll, (n, l, min a ll))) spareElectrons $
-               map (\(e, n, l) -> (n, l, (l+1)^2)) $
-               sort $ filter ((<0) . fst3) $
-               (\s (n, l) -> (approxOrbitalEnergy atom (n, l, s), n, l)) <$> [Up, Down] <*>
-               (concat $ zipWith (zipWith (const id)) (energies' atom) indices)
-          mergeSpins = mergeBy (\(n0, l0, o0) (n1, l1, o1) -> if n0 == n1 && l0 == l1 then Just (n0,l0,o0+o1) else Nothing)
-          trimEA = mergeSpins . map (\(n,l,s,o) -> (n,l,o)) . filter ((<0) . approxOrbitalEnergy atom . (\(n,l,s,o) -> (n,l,s))) . concatMap splitSpin
+electronArrangement atom = occsToEA $ round <$> occupations atom
+doubleElectronArrangement :: Atom -> [(N, L, Double)]
+doubleElectronArrangement atom = occsToEA $ occupations atom
 
-prevElectronArrangement :: Atom -> [(N, L, Int)]
-prevElectronArrangement = concat . zipWith (zipWith (\(n, l) o -> (n, l, floor o))) indices . prevOccs
+occsToEA :: Eq a => PerOrbital a -> [(N, L, a)]
+occsToEA = concat . poToList . liftPO2Short (uncurry (,,) . fromJust) indices . trimPO
+eaToOccs :: [(N, L, Int)] -> PerOrbital Int
+eaToOccs = PerOrbital 0 . map (map (sum . map þrd3) . compileOn ((+(-1)) . fst3)) . compileOn snd3
+    where compileOn :: (a -> Int) -> [a] -> [[a]]
+          compileOn = compileOn' 0
+          compileOn' n f [] = []
+          compileOn' n f xs = uncurry (:) $ second (compileOn' (n+1) f) $ partition ((n==) . f) xs
 
-indices :: [[(N, L)]]
-indices = [[(n, l) | n <- [1..]] | l <- [0..]]
+forceEA :: Atom -> [(N, L, Int)] -> Atom
+forceEA atom ea = atom{forcedOccs = eaToOccs ea}
 
+forcedEA atom = occsToEA $ forcedOccs atom
 
-occupations' :: [(N,L,Int)] -> [Int]
-occupations' = map length . group . sort . map snd3
-occupations :: Atom -> [Int]
-occupations  = occupations' . electronArrangement
-
-addOrbital :: [Int] -> Atom -> Atom
-addOrbital occs atom = addOrbitalAt atom (getNextOrbital occs $ energies' atom)
-
-getNextOrbital :: [Int] -> [[Energy]] -> L
-getNextOrbital occs [] = 0
-getNextOrbital occs es
-    | length (last es) > 1 = length es
-    | otherwise            = snd3 $ minimum $ filter (\(e, l, occ) -> null $ drop occ e) $ zip3 es [0..] (occs++repeat 0)
-
-addOrbitalAt :: Atom -> L -> Atom
-addOrbitalAt atom l = atom
-        {
-            energies = appendAt l e (energies atom),
-            orbitals = appendAt l o (orbitals atom),
-            shieldingPotentials = appendAt l p (shieldingPotentials atom)
-        }
-    where n  = 1 + length (energies atom !! l)
-          (e, o, p) = genOrbitalAt atom 0.5 n l (-1)
-
-genOrbitalAt :: Atom -> Double -> N -> L -> Energy -> (Energy, Orbital, [Double])
-genOrbitalAt atom smooth n l e0 = (e, o, p)
-    where rs = atomGrid atom
-          vs = getPotential atom n l Nothing
-          e  = findEnergyHinted e0 rs vs n
-          o  = normalizedOrbital rs vs e
-          pn = genShieldingPotential rs o
-          po = ((map Just $ shieldingPotentials atom !! l) ++ repeat Nothing) !! (n-1)
-          p  = (zipWith (\a b -> a + smooth*(b-a)) pn) $ maybe (repeat 0) id po
-
-updateAtom :: Bool -> Double -> Atom -> Atom
-updateAtom small smooth atom = (if small then id else fillAtom) $ let
-        es = maybe id (zipWith take . occupations') (if small then forcedEA atom else Nothing) (energies'' atom)
-        (es', ψs', vs') = unzip3 $ map unzip3 $ zipWith (zipWith $ uncurry $ genOrbitalAt atom smooth) indices es
-        lerp x a b = if abs (a-b) < 0.05 then b else b*x + a*(1-x)
-        os' = zipWith (zipWith (lerp smooth)) (prevOccs' atom) $ map (map (fromIntegral . þrd3) . sort) $ groupBy (on (==) snd3) $ sortBy (on compare snd3) $ electronArrangement atom
-    in atom
-        {
-            energies = es' ++ repeat [],
-            orbitals = ψs' ++ repeat [],
-            shieldingPotentials = vs' ++ repeat [],
-            prevOccs = os',
-            totalPotential = foldr (zipWith (+)) (repeat 0) $ concat $ zipWith (zipWith (map . (*))) os' vs'
-        }
-
-updateAtomUntilConvergence :: Atom -> Atom
-updateAtomUntilConvergence = uauc' 0
-    where uauc' n atom
-              | atomsSimilar atom next           = next
-              | on (>) incorrectCharge next atom = if n >= 3 then next else uauc' (n+1) next
-              | otherwise                        = uauc' n next
-                  where next = traceShow (energies' atom) $ traceShow (prevOccs atom) $ {-traceShow (carefulEnergies atom) $-} traceShow (prettifyElectronArrangement atom <$> forcedEA atom) $ trace (prettyElectronArrangement atom) $ updateAtom True (1/ fromIntegral (n+1)) atom
-
-atomsSimilar :: Atom -> Atom -> Bool
-atomsSimilar a0 a1 = prevOccs a0 == prevOccs a1 &&
-                     (all (all id) $ zipWith3 (zipWith3 similarEnergies) (energies' a0) (energies' a1) boolOccs)
-    where similarEnergies e0 e1 occupied = (not occupied && e0<1e-8 && e1==0) || abs (e0-e1) <= min 0.001 (0.01*abs (e0+e1))
-          boolOccs = map ((++ repeat False) . flip replicate True) (occupations a0) ++ repeat (repeat False)
-
-genShieldingPotential :: Grid -> Orbital -> [Double]
-genShieldingPotential rs ψs = map (* coulumb'sConstant) $ zipWith (+) vOut vIn
-    where d     = zipWith3 (\ψ r r' -> ψ^2 * r^3 * (r' - r)) ψs rs (tail rs)
-          invSq = zipWith (\r x -> x/(r^2)) rs
-          vOut  = (scanr (+) 0 $ invSq d) ++ repeat 0
-          vIn   = invSq $ scanl (+) 0 d ++ repeat 1
-
-getPotential :: Atom -> N -> L -> Maybe Spin -> Potential
-getPotential atom n0 l0 s0 = first (zipWith (+) $ fst baseV) (getShieldingPotential atom n0 l0 s0)
-    where rs    = atomGrid atom
-          z     = atomicNumber atom
-          baseV = basePotential rs (fromIntegral l0) (fromIntegral z)
-
-getShieldingPotential :: Atom -> N -> L -> Maybe Spin -> Potential
-getShieldingPotential atom n0 l0 s0 = (vs, xs)
-    where arr       = concat $ zipWith (zipWith (uncurry (,,))) indices $ prevOccs atom
-          occ0'     = þrd3 <$> find (\(n,l,_) -> n == n0 && l == l0) arr
-          occ0      = maybe 0 id occ0'
-          zeroEnergy= (((energies atom !! l0) ++ repeat 0) !! (n0-1)) == 0
-          upOcc0    = case s0 of
-                          Just Up   -> occ0
-                          Just Down -> 0
-                          Nothing   -> min occ0 $ fromIntegral (l0 + 1)^2
-          ψs0       = orbitals atom !! l0 !! (n0-1)
-          rs        = atomGrid atom
-          xch n l o = let
-                  ψs = (orbitals atom !! l !! (n-1))
-                  orbOverlap = zipWith4 (\r r' ψ0 ψ -> (r'-r)*ψ*ψ0*r^3) rs (tail rs) ψs0 ψs
-                  dl = abs (l-l0) -- The lowest term with non-zero coefficient
-                  bias i = zipWith (*) (map (^^i) rs)
-                  inner = bias   dl    $ scanr (+) 0 $ bias (-dl-2) orbOverlap
-                  outer = bias (-dl-2) $ scanl (+) 0 $ bias   dl    orbOverlap
-                  o' = xchOcc n l o
-              in zipWith3 (\ψ inn out -> o'*ψ*(inn+out)/fromIntegral ((l+1)*(l0+1))) ψs inner outer ++ repeat 0
-          xchOcc n l o
-              | isNothing occ0'    = min o (fromIntegral (l+1)^2)
-              | n == n0 && l == l0 = 2*upOcc0^2 / occ0 + occ0 - 2*upOcc0 - 1
-              | otherwise          = ((occ0 - upOcc0)*o + (2*upOcc0 - occ0) * min o (fromIntegral (l+1)^2))/occ0
-          vs        = (if zeroEnergy then id else zipWith (flip (-)) (shieldingPotentials atom !! l0 !! (n0-1))) $ totalPotential atom
-          xs        = foldr (zipWith (+)) (repeat 0) $ if zeroEnergy then [] else map (uncurry3 xch) arr
-
-
-appendAt :: Int -> a -> [[a]] -> [[a]]
-appendAt n x xss = xssh ++ (xs ++ [x]) : xsst
-    where (xssh, (xs:xsst)) = splitAt n xss
+correctEA :: Atom -> Bool
+correctEA atom = occupations atom == (fromIntegral <$> forcedOccs atom)
 
 prettyElectronArrangement :: Atom -> String
 prettyElectronArrangement atom = prettifyElectronArrangement atom (electronArrangement atom)
@@ -225,23 +164,100 @@ prettifyElectronArrangement atom ea = (unwords $ map (\(n, l, o) -> show (n+l) +
     where errorCharge = electronsRequired atom - sum (map þrd3 ea)
           chargeLabel = if errorCharge == 0 then "" else "  " ++ show errorCharge ++ "!!"
 
-atomFull :: Atom -> Bool
-atomFull atom = incorrectCharge atom == 0
-
-incrementAtom :: Atom -> Atom
-incrementAtom atom = relaxAtom $ copyAtom atom (atomicNumber atom + 1) (charge atom)
-
-cationise :: Atom -> Atom
-cationise atom = relaxAtom atom{charge = charge atom + 1}
-anionise  :: Atom -> Atom
-anionise  atom = relaxAtom atom{charge = charge atom - 1}
-
-aperiodicTable :: [Atom]
-aperiodicTable = iterate incrementAtom (makeAtom 1 0)
 
 
-atomAdjEAs :: Atom -> [[(N, L, Int)]]
-atomAdjEAs atom = adjacentElectronArrangements (electronArrangement atom) (electronsRequired atom)
+genShieldingPotential :: Grid -> Orbital -> [Double]
+genShieldingPotential rs ψs = map (* coulumb'sConstant) $ zipWith (+) vOut vIn
+    where d     = zipWith3 (\ψ r r' -> ψ^2 * r^3 * (r' - r)) ψs rs (tail rs)
+          invSq = zipWith (\r x -> x/(r^2)) rs
+          vOut  = (scanr (+) 0 $ invSq d) ++ repeat 0
+          vIn   = invSq $ scanl (+) 0 d ++ repeat 1
+
+--Calculate further details of the same atom.
+genAtomCache :: Atom -> AtomCache
+genAtomCache atom = AtomCache
+        atom
+        (foldr (zipWith (+)) (repeat 0) ((map . (*)) <$> (trimPO $ occupations atom) <*> vs))
+        vs
+    where vs = genShieldingPotential (atomGrid atom) <$> orbitals atom
+
+getShieldingPotential :: AtomCache -> N -> L -> Maybe Spin -> Potential
+getShieldingPotential atomCache n0 l0 s0 = (vs, xs)
+    where atom      = atomInCache atomCache
+          arr       = doubleElectronArrangement atom
+          occ0      = getPO (occupations atom) n0 l0
+          zeroEnergy= getPO (energies atom) n0 l0 == 0
+          upOcc0    = case s0 of
+                          Just Up   -> occ0
+                          Just Down -> 0
+                          Nothing   -> min occ0 $ fromIntegral (l0 + 1)^2
+          ψs0       = getPO (orbitals atom) n0 l0
+          rs        = atomGrid atom
+          xch n l o = let
+                  ψs = getPO (orbitals atom) n l
+                  orbOverlap = zipWith4 (\r r' ψ0 ψ -> (r'-r)*ψ*ψ0*r^3) rs (tail rs) ψs0 ψs
+                  dl = abs (l-l0) -- The lowest term with non-zero coefficient
+                  bias i = zipWith (*) (map (^^i) rs)
+                  inner = bias   dl    $ scanr (+) 0 $ bias (-dl-2) orbOverlap
+                  outer = bias (-dl-2) $ scanl (+) 0 $ bias   dl    orbOverlap
+                  o' = xchOcc n l o
+              in zipWith3 (\ψ inn out -> o'*ψ*(inn+out)/fromIntegral ((l+1)*(l0+1))) ψs inner outer ++ repeat 0
+          xchOcc n l o
+              | occ0 == 0          = min o (fromIntegral (l+1)^2)
+              | n == n0 && l == l0 = 2*upOcc0^2 / occ0 + occ0 - 2*upOcc0 - 1
+              | otherwise          = ((occ0 - upOcc0)*o + (2*upOcc0 - occ0) * min o (fromIntegral (l+1)^2))/occ0
+          vs        = (if zeroEnergy then id else zipWith (flip (-)) (getPO (shieldingPotentials atomCache) n0 l0)) $ totalPotential atomCache
+          xs        = foldr (zipWith (+)) (repeat 0) $ if zeroEnergy then [] else map (uncurry3 xch) arr
+
+getPotential :: AtomCache -> N -> L -> Maybe Spin -> Potential
+getPotential atomC n0 l0 s0 = first (zipWith (+) $ fst baseV) (getShieldingPotential atomC n0 l0 s0)
+    where atom  = atomInCache atomC
+          rs    = atomGrid atom
+          z     = atomicNumber atom
+          baseV = basePotential rs (fromIntegral l0) (fromIntegral z)
+
+
+
+genOrbitalAt :: AtomCache -> N -> L -> Energy -> (Energy, Orbital)
+genOrbitalAt atom n l e0 = (e, o)
+    where rs = atomGrid $ atomInCache $ atom
+          vs = getPotential atom n l Nothing
+          e  = findEnergyHinted e0 rs vs n
+          o  = normalizedOrbital rs vs e
+
+updateAtom :: AtomCache -> Double -> Bool -> Atom
+updateAtom prevAC smooth expand = let
+        atom = atomInCache prevAC
+        es = liftPO2Short const (untrimPO $ energies atom) ((if expand then untrimPO else id) $ trimPO $ forcedOccs atom)
+        unzipPO p = (fst <$> p, snd <$> p)
+        (es', ψs') = unzipPO $ liftPO2Short (maybe (const (0,[])) $ uncurry $ genOrbitalAt prevAC) indices es
+        smoothOcc o' o = if abs (o'-o)*(1-smooth) < 0.1 then o else smooth*o + (1-smooth)*o'
+        os' = trimPO $ liftA3 (\e o' o -> if e==0 then 0 else smoothOcc o' (fromIntegral o)) es' (occupations atom) (forcedOccs atom)
+    in atom
+        {
+            energies = es',
+            orbitals = ψs',
+            occupations = os'
+        }
+
+traceAtom :: Atom -> a -> a
+traceAtom atom = traceShow (energies atom) . traceShow (occupations atom) . {-traceShow (carefulEnergies atom) .-} trace (prettifyElectronArrangement atom $ occsToEA $ forcedOccs atom) . trace (prettyElectronArrangement atom ++ "\n")
+
+atomsSimilar :: Atom -> Atom -> Bool
+atomsSimilar a0 a1 = occupations a0 == occupations a1 &&
+                     (all id (similarEnergies <$> (energies a0) <*> (energies a1) <*> boolOccs))
+    where similarEnergies e0 e1 occupied = (not occupied && e0<1e-8 && e1==0) || abs (e0-e1) <= min 0.001 (0.01*abs (e0+e1))
+          boolOccs = fmap (>0) (occupations a0)
+
+updateAtomUntilConvergence :: Atom -> Atom
+updateAtomUntilConvergence = (\a -> traceAtom a a) . uauc' 0
+    where uauc' n atom
+              | atomsSimilar atom next           = next
+              | on (>) incorrectCharge next atom = if n >= 3 then next else uauc' (n+1) next
+              | otherwise                        = uauc' n next
+                  where next = traceAtom atom $ updateAtom (genAtomCache atom) (1/ fromIntegral (n+1)) False
+
+
 
 adjacentElectronArrangements :: [(N, L, Int)] -> Int -> [[(N, L, Int)]]
 adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . þrd3)) $ (if errCharge > 0 then veryNegativeOthers ++ negativeOthers else []) ++ others ++ positiveOthers
@@ -270,23 +286,20 @@ adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . 
           positiveOthers = map (chargedEA (-1))  removalFrontier
           negativeOthers = map (chargedEA   1 ) additionFrontier
           veryNegativeOthers = map (\(n,l,o,o') -> chargedEA o' (n,l,o)) $ filter ((>1) . frþ4) $ (\(n,l,o) -> (n,l,o,min errCharge $ 2*(l+1)^2-o)) <$> additionFrontier
-
-forceEA :: Atom -> [(N, L, Int)] -> Atom
-forceEA atom ea = atom{forcedEA = Just ea}
-
-correctEA :: Atom -> Bool
-correctEA atom = case forcedEA atom of
-    Just ea -> electronArrangement atom == ea
-    Nothing -> True
+          
+atomAdjEAs :: Atom -> [[(N, L, Int)]]
+atomAdjEAs atom = adjacentElectronArrangements (electronArrangement atom) (electronsRequired atom)
 
 relaxAtom :: Atom -> Atom
-relaxAtom atom = relax' atom' S.empty
-    where atom' = updateAtomUntilConvergence $ forceEA atom (electronArrangement atom)
-          relax' bestA triedEAs = case as of {[] -> bestA; (bestA':_) -> relax' bestA' triedEAs'}
+relaxAtom atom = relax' (updateAtomUntilConvergence atom) S.empty
+    where relax' bestA triedEAs = case as of {[] -> bestA; (bestA':_) -> relax' bestA' triedEAs'}
               where nextEAs = filter (flip S.notMember triedEAs) $ atomAdjEAs bestA
-                    nextAtomInits = sortOn (\a -> (abs $ forcedIncorrectCharge a, totalEnergy a)) $ map (forceEA $ updateAtom False 0.5 bestA) nextEAs
+                    nextAtomInits = sortOn (\a -> (abs $ forcedIncorrectCharge a, totalEnergy a)) $ map (forceEA $ updateAtom (genAtomCache bestA) 0.3 True) nextEAs
                     nextAtoms = map updateAtomUntilConvergence nextAtomInits
                     (failedAtoms, as) = span (not . better) nextAtoms
                     better a = correctEA a && on (<) (\a' -> (max 0 (-incorrectCharge a'), totalEnergy a')) a bestA
-                    triedEAs' = S.union triedEAs $ S.fromList $ map (fromJust . forcedEA) $ bestA : failedAtoms
-                    forcedIncorrectCharge a = electronsRequired a - sum (map þrd3 $ fromJust $ forcedEA a)
+                    triedEAs' = S.union triedEAs $ S.fromList $ map forcedEA $ bestA : failedAtoms
+                    forcedIncorrectCharge a = electronsRequired a - sum (forcedOccs a)
+
+makeAtom :: Int -> Int -> Atom
+makeAtom z c = relaxAtom $ emptyAtom z c

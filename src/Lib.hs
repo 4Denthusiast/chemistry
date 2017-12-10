@@ -13,15 +13,15 @@ processAtom z c = let atom = makeAtom z c in do
     let energy = totalEnergy atom
         ions   = reverse (cationsOf atom) ++ anionsOf atom
     putStrLn $ show $ energy
-    putStrLn $ show $ energies' atom
+    putStrLn $ show $ energies atom
     graphAtom atom
     putStrLn $ unlines $ map (showIon energy) ions
 
 anionsOf :: Atom -> [Atom]
-anionsOf = takeWhile atomFull . tail . iterate anionise
+anionsOf = takeWhile ((==0) . incorrectCharge) . iterate anionise
 
 cationsOf :: Atom -> [Atom]
-cationsOf atom = takeWhile (\ion -> charge ion <= atomicNumber ion && totalEnergy ion < totalEnergy atom + 0.07) $ iterate cationise atom
+cationsOf atom = takeWhile (\ion -> charge ion <= atomicNumber ion && totalEnergy ion < totalEnergy atom + 0.07) $ tail $ iterate cationise atom
 
 showIon :: Double -> Atom -> String
 showIon e0 ion = (if charge ion >= 0 then "+" else "") ++ show (charge ion) ++ ": " ++ show (e0 - totalEnergy ion)

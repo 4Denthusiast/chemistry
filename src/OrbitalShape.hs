@@ -53,8 +53,8 @@ exponential a r = toHopfBasis $ sum $ take n terms
 -- if (asymptoticDecline atom n l == (a, k)), the n, l orbital in the atom has asymptotic form ke^(-ar)r^(-1.5).
 asymptoticDecline :: Atom -> N -> L -> (Double, Double)
 asymptoticDecline atom n l = (a, k)
-    where a      = sqrt $ (-2) * energies atom !! l !! (n-1)
-          orb    = orbitals atom !! l !! (n-1)
+    where a      = sqrt $ (-2) * getPO (energies atom) n l
+          orb    = getPO (orbitals atom) n l
           (ψ, r) = (!!30) $ reverse $ zip orb (atomGrid atom)
           k      = ψ / (r**(-1.5) * exp (-a*r))
 
@@ -63,7 +63,7 @@ extendedOrbital :: Atom -> N -> L -> Orbital
 extendedOrbital atom n l = replace (dropEnd 30 orb) orbTail
     where (a, k)      = asymptoticDecline atom n l
           orbTail     = map (\r -> k * r**(-1.5) * exp (-a*r)) $ atomGrid atom
-          orb         = orbitals atom !! l !! (n-1)
+          orb         = getPO (orbitals atom) l n
           replace x y = zipWith id (map const x ++ repeat id) y
           dropEnd n x = zipWith const x (drop n x)
 
@@ -86,12 +86,12 @@ asymptoticOverlap atm0 n0 l0 atm1 n1 l1 m1 m2 = (a, exponentialOverlap rs ψs ψ
           ψl = orbitalShape l1 m1 m2
           (a, k) = asymptoticDecline atm0 n0 l0
 
--- TODO: trim the integral over the extended orbital down to finite size.
-asymOverlap :: Atom -> N -> L -> Atom -> N -> L -> L -> L -> (Double, Double, Double)
-asymOverlap atm0 n0 l0 atm1 n1 l1 m1 m2 = (a, integrate ov, integrate (zipWith (*) ov vs))
-    where (a, ov)   = asymptoticOverlap atm0 n0 l0 atm1 n1 l1 m1 m2
+asymOverlap :: AtomCache -> N -> L -> AtomCache -> N -> L -> L -> L -> (Double, Double, Double)
+asymOverlap ac0 n0 l0 ac1 n1 l1 m1 m2 = (a, integrate ov, integrate (zipWith (*) ov vs))
+    where [atm0, atm1] = map atomInCache [ac0,ac1]
+          (a, ov)   = asymptoticOverlap atm0 n0 l0 atm1 n1 l1 m1 m2
           rs        = atomGrid atm1
-          vs        = map (min 0) $ fst $ getPotential atm1 n1 l1 Nothing -- Exclude the negative part as (to a crude approximation), the other orbital will be repelled and won't penetrate. It will have additional kinetic energy from this, but that's ignored. The exchange energy is negligible as separation->infinity.
+          vs        = map (min 0) $ fst $ getPotential ac1 n1 l1 Nothing -- Exclude the negative part as (to a crude approximation), the other orbital will be repelled and won't penetrate. It will have additional kinetic energy from this, but that's ignored. The exchange energy is negligible as separation->infinity.
           integrate = trimSum 0 0 0 . zipWith3 (\r r' x -> r^3*x*(r'-r)) rs (tail rs)
           trimSum s m a [] = s
           trimSum s m a (x:xs) = let a' = a + 0.03*(abs x - a)
@@ -99,7 +99,7 @@ asymOverlap atm0 n0 l0 atm1 n1 l1 m1 m2 = (a, integrate ov, integrate (zipWith (
                                      s' = s + x
                                  in if a < 0.01*m then s' else trimSum s' m' a' xs
 
-bondEnergy :: Bool -> Atom -> N -> L -> L -> L -> Atom -> N -> L -> L -> L -> (Double, Double, Double)
+bondEnergy :: Bool -> AtomCache -> N -> L -> L -> L -> AtomCache -> N -> L -> L -> L -> (Double, Double, Double)
 bondEnergy sgnB atm0 n0 l0 m10 m20 atm1 n1 l1 m11 m21 = ((a0+a1)/2, sgn*hov/2, hov * ov)
     where (a0, ov0, hov0) = asymOverlap atm1 n1 l1 atm0 n0 l0 m10 m20
           (a1, ov1, hov1) = asymOverlap atm0 n0 l0 atm1 n1 l1 m11 m21

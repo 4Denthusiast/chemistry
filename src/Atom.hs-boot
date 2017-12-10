@@ -1,29 +1,31 @@
 module Atom(
     Atom(..),
-    energies',
-    electronArrangement,
-    prevElectronArrangement,
-    indices
+    PerOrbital,
+    getPO,
+    indices,
+    electronArrangement
 ) where
 
 import Orbital
+
+data PerOrbital a = PerOrbital a [[a]]
+instance Functor PerOrbital
+instance Applicative PerOrbital
+
+getPO :: PerOrbital a -> N -> L -> a
+
+indices :: PerOrbital (Maybe (N,L))
 
 data Atom = Atom
     {
         atomicNumber :: Int,
         charge :: Int,
-        energies :: [[Energy]],
-        orbitals :: [[Orbital]],
-        totalPotential :: [Double],
-        shieldingPotentials :: [[[Double]]],
         atomGrid :: Grid,
-        prevOccs :: [[Double]],
-        forcedEA :: Maybe [(N, L, Int)]
+        forcedOccs :: PerOrbital Int,
+        energies :: PerOrbital Energy,
+        orbitals :: PerOrbital Orbital,
+        occupations :: PerOrbital Double
     }
 
-energies' :: Atom -> [[Energy]]
 
 electronArrangement :: Atom -> [(N, L, Int)]
-prevElectronArrangement :: Atom -> [(N, L, Int)]
-
-indices :: [[(N,L)]]
