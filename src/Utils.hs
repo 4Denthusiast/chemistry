@@ -7,6 +7,7 @@ module Utils(
     uncurry3,
     map2,
     map3,
+    zipWithLong
 ) where
 
 fst3 :: (a, b, c) -> a
@@ -37,3 +38,9 @@ map2 :: (a -> b) -> [[a]] -> [[b]]
 map2 = map . map
 map3 :: (a -> b) -> [[[a]]] -> [[[b]]]
 map3 = map . map2
+
+-- Extend the shorter list to the length of the longer.
+zipWithLong :: a -> b -> (a -> b -> c) -> [a] -> [b] -> [c]
+zipWithLong xr yr f [] ys = map (f xr) ys
+zipWithLong xr yr f xs [] = map (flip f yr) xs
+zipWithLong xr yr f (x:xs) (y:ys) = f x y : zipWithLong xr yr f xs ys

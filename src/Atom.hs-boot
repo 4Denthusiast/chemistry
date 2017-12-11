@@ -23,6 +23,7 @@ data Atom = Atom
         atomGrid :: Grid,
         forcedOccs :: PerOrbital Int,
         energies :: PerOrbital Energy,
+        prevEnergies :: PerOrbital Energy,
         orbitals :: PerOrbital Orbital,
         occupations :: PerOrbital Double
     }

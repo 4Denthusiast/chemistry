@@ -87,6 +87,7 @@ data Atom = Atom
         atomGrid :: Grid,
         forcedOccs :: PerOrbital Int,
         energies :: PerOrbital Energy,
+        prevEnergies :: PerOrbital Energy, -- For detecting rate of convergence.
         orbitals :: PerOrbital Orbital,
         occupations :: PerOrbital Double
     }
@@ -105,7 +106,7 @@ incorrectCharge :: Atom -> Double
 incorrectCharge atom = fromIntegral (electronsRequired atom) - sum (occupations atom)
 
 emptyAtom :: Int -> Int -> Atom
-emptyAtom z c = Atom z c (logGrid 0.01 (fromIntegral z)) (emptyPO 0) (emptyPO 0) (emptyPO (error "No default orbital")) (emptyPO 0)
+emptyAtom z c = Atom z c (logGrid 0.01 (fromIntegral z)) (emptyPO 0) (emptyPO 0) (emptyPO 0) (emptyPO []) (emptyPO 0)
 
 -- If the atomic numbers are similar, this should converge faster than starting from empty.
 copyAtom :: Atom -> Int -> Int -> Atom
@@ -236,9 +237,37 @@ updateAtom prevAC smooth expand = let
     in atom
         {
             energies = es',
+            prevEnergies = energies atom,
             orbitals = ψs',
             occupations = os'
         }
+-- Given that f(xi)=yi, estimate an x such that (lerp x y1 y2) is a fixed point of f, assuming it's linear.
+linearFix x1 y1 x2 y2 = max 0.05 $ min 1 $ (x1-y1)/(x1-y1-x2+y2)
+
+mixAtoms :: AtomCache -> AtomCache -> AtomCache
+mixAtoms ac0 ac1 = let
+        [atom0, atom1] = map atomInCache [ac0, ac1]
+        xs = linearFix <$> prevEnergies atom0 <*> energies atom0 <*> prevEnergies atom1 <*> energies atom1
+        lerp x a b = case x of {0 -> a; 1 -> b; _ -> b*x + a*(1-x)}
+        lerpxs f = lerp <$> xs <*> f atom0 <*> f atom1
+        lerpsxs f = (zipWithLong 0 0 . lerp) <$> xs <*> f ac0 <*> f ac1
+        occs = lerpxs occupations
+        shields = lerpsxs shieldingPotentials
+    in --trace ("mixing: "++show xs) $
+    AtomCache
+        atom1{
+            energies = lerpxs energies,
+            prevEnergies = lerpxs prevEnergies,
+            occupations = occs,
+            orbitals = lerpsxs (orbitals . atomInCache) -- This isn't normalised, but that shouldn't be a problem.
+        }
+        (foldr (zipWith (+)) (repeat 0) $ (map . (*)) <$> occs <*> shields)
+        shields
+
+startAtom :: AtomCache -- an atom such that (mixAtoms startAtom ~= id)
+startAtom = AtomCache
+    (Atom undefined undefined undefined undefined (emptyPO 0) (emptyPO (1e20)) (emptyPO []) (emptyPO 0))
+    [] (emptyPO [])
 
 traceAtom :: Atom -> a -> a
 traceAtom atom = traceShow (energies atom) . traceShow (occupations atom) . {-traceShow (carefulEnergies atom) .-} trace (prettifyElectronArrangement atom $ occsToEA $ forcedOccs atom) . trace (prettyElectronArrangement atom ++ "\n")
@@ -250,12 +279,14 @@ atomsSimilar a0 a1 = occupations a0 == occupations a1 &&
           boolOccs = fmap (>0) (occupations a0)
 
 updateAtomUntilConvergence :: Atom -> Atom
-updateAtomUntilConvergence = (\a -> traceAtom a a) . uauc' 0
-    where uauc' n atom
+updateAtomUntilConvergence = (\a -> traceAtom a a) . uauc' 0 startAtom . removePrevEnergies
+    where removePrevEnergies atom = atom{prevEnergies = emptyPO 0}
+          uauc' n prev atom
               | atomsSimilar atom next           = next
-              | on (>) incorrectCharge next atom = if n >= 3 then next else uauc' (n+1) next
-              | otherwise                        = uauc' n next
-                  where next = traceAtom atom $ updateAtom (genAtomCache atom) (1/ fromIntegral (n+1)) False
+              | on (>) incorrectCharge next atom = if n >= 3 then next else uauc' (n+1) ac next
+              | otherwise                        = uauc' n ac next
+                  where next = traceAtom atom $ updateAtom (mixAtoms prev ac) (1/ fromIntegral (n+1)) False
+                        ac   = genAtomCache atom
 
 
 
