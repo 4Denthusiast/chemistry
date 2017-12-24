@@ -23,7 +23,7 @@ import Data.Bits.Floating.Ulp
 
 import Debug.Trace
 traceShow1 :: Show a => a -> b -> b
-traceShow1 = traceShow
+traceShow1 = const id
 
 type Potential = ([Double], [Double]) -- The first list is the actual potential. The second if for the exchange energy, which can't be described simply as a potential.
 type Grid = [Double] -- radius sampling points
@@ -84,20 +84,29 @@ findEnergyHinted e0 rs vs n = traceShow1 (e0, n) $ let
         e0' = min e0 (-1e-16)
         approxEq a b = abs (a-b) < 1e-12 * min (abs a) (abs b)
         iter :: Energy -> Energy -> Energy -> Energy
-        iter e ll hh = traceShow1 e $ let
+        iter e ll hh = traceShow1 [e,ll,hh] $ let
                 orbital      = trimmedOrbital rs vs e
                 ((ψ, dψ), r, v) = last $ zip3 orbital rs (fst vs)
                 roundError   = doubleUlp e * ((\(Dual _ x) -> x) ψ)
                 roundWarning = if roundError * r > 0.01 then trace "Rounding error." else id
                 err          = ψ + dual (1 / (sqrt (-2*e)+1.5/r))*dψ
                 e'           = let (Dual era ere) = err in max (e*1.6) $ min (e*0.6) $ e - era/ere
+                (ll', hh')
+                    |  ψ * ((-1)^n) > 0 = (ll,min hh e)
+                    | dψ * ((-1)^n) < 0 = (max ll e,hh)
+                    | e' < e            = (ll,min hh e)
+                    | otherwise         = (max ll e,hh)
+                mid          = if isInfinite ll then 2*hh' else (hh'+ll')/2
                 n1           = principalNumber rs orbital
                 e''
-                    | e > -1e-20             = 0
-                    | approxEq e' e          = e
-                    | n1 < n                 = traceShow1 n1 $ traceShow1 n $ iter (0.3^(n-n1) * max e ll) (0.7 * max e ll) hh
-                    | n1 > n                 = traceShow1 n1 $ traceShow1 n $ iter (3.0^(n1-n) * min e hh) ll (1.4 * min e hh)
-                    | otherwise              = iter e' ll hh
+                    | e > -1e-20     = 0
+                    | approxEq e' e  = e
+                    | approxEq ll hh = ll
+                    | e' >= hh       = traceShow1 'h' $ iter mid ll' hh' -- If it's no better than it was before, default to binary search.
+                    | e' <= ll       = traceShow1 'l' $ iter mid ll' hh'
+                    | n1 < n         = traceShow1 n1 $ traceShow1 n $ iter (0.3^(n-n1) * max e ll) (0.7 * max e ll) hh
+                    | n1 > n         = traceShow1 n1 $ traceShow1 n $ iter (2.5^(n1-n) * min e hh) ll (1.4 * min e hh)
+                    | otherwise      = iter e' ll' hh'
             in roundWarning e''
     in
         if orbitalExists rs vs n then iter e0' (-1/0) 0 else 0
