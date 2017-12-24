@@ -11,7 +11,7 @@ processAtom :: Int -> Int -> IO ()
 processAtom z c = let atom = makeAtom z c in do
     putStrLn $ prettyElectronArrangement atom
     let energy = totalEnergy atom
-        ions   = reverse (cationsOf atom) ++ anionsOf atom
+        ions   = reverse $ reverse (anionsOf atom) ++ cationsOf atom
     putStrLn $ show $ energy
     putStrLn $ show $ energies atom
     graphAtom atom
@@ -26,8 +26,8 @@ cationsOf atom = takeWhile (\ion -> charge ion <= atomicNumber ion && totalEnerg
 showIon :: Double -> Atom -> String
 showIon e0 ion = (if charge ion >= 0 then "+" else "") ++ show (charge ion) ++ ": " ++ show (e0 - totalEnergy ion)
 
-printEaTable :: Int -> IO ()
-printEaTable = mapM_ processElement . flip take aperiodicTable
+printEaTable :: Maybe Int -> IO ()
+printEaTable = mapM_ processElement . flip (maybe id take) aperiodicTable
     where processElement a = do
             putStr $ show $ atomicNumber a
             putStr ":  "

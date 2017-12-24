@@ -24,6 +24,7 @@ data Atom = Atom
         forcedOccs :: PerOrbital Int,
         energies :: PerOrbital Energy,
         prevEnergies :: PerOrbital Energy,
+        smoothingFactors :: PerOrbital Double,
         orbitals :: PerOrbital Orbital,
         occupations :: PerOrbital Double
     }

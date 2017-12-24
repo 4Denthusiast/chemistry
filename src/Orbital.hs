@@ -36,7 +36,7 @@ data Spin = Up | Down deriving (Eq, Ord, Enum)
 instance Show Spin where{show Up = "↑"; show Down = "↓"}
 
 logGrid :: Double -> Double -> Grid
-logGrid spacing z = iterate (* (1 + spacing)) (log (slimConstant/coulumb'sConstant) - 3/(sqrt z +1))
+logGrid spacing z = iterate (* (1 + spacing)) (max 0.4 $ log (slimConstant/coulumb'sConstant) - 3/(sqrt z +1))
 
 -- The effective potential purely from nuclear charge and angular momentum
 basePotential :: Grid -> Double -> Double -> Potential
@@ -44,8 +44,8 @@ basePotential grid l charge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce
     where coulumbForce r = charge * (-coulumb'sConstant + slimConstant / exp r) / (r*r)
 
 coulumb'sConstant, slimConstant :: Double
-coulumb'sConstant = 0.5
-slimConstant = 4
+coulumb'sConstant = 0.7
+slimConstant = coulumb'sConstant * 1.71
 
 -- Calculates the orbital with the fixed energy value.
 singleOrbital :: Grid -> Potential -> Energy -> DOrbital

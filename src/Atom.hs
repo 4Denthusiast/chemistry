@@ -88,6 +88,7 @@ data Atom = Atom
         forcedOccs :: PerOrbital Int,
         energies :: PerOrbital Energy,
         prevEnergies :: PerOrbital Energy, -- For detecting rate of convergence.
+        smoothingFactors :: PerOrbital Double,
         orbitals :: PerOrbital Orbital,
         occupations :: PerOrbital Double
     }
@@ -106,7 +107,7 @@ incorrectCharge :: Atom -> Double
 incorrectCharge atom = fromIntegral (electronsRequired atom) - sum (occupations atom)
 
 emptyAtom :: Int -> Int -> Atom
-emptyAtom z c = Atom z c (logGrid 0.01 (fromIntegral z)) (emptyPO 0) (emptyPO 0) (emptyPO 0) (emptyPO []) (emptyPO 0)
+emptyAtom z c = Atom z c (logGrid 0.01 (fromIntegral z)) (emptyPO 0) (emptyPO 0) (emptyPO 0) (emptyPO 1) (emptyPO []) (emptyPO 0)
 
 -- If the atomic numbers are similar, this should converge faster than starting from empty.
 copyAtom :: Atom -> Int -> Int -> Atom
@@ -242,23 +243,29 @@ updateAtom prevAC smooth expand = let
             occupations = os'
         }
 -- Given that f(xi)=yi, estimate an x such that (lerp x y1 y2) is a fixed point of f, assuming it's linear.
-linearFix x1 y1 x2 y2 = max 0.05 $ min 1 $ (x1-y1)/(x1-y1-x2+y2)
+linearFix x1 y1 x2 y2
+    | isNaN a || isInfinite a = 0.4
+    | a > 1                   = 1
+    | otherwise               = max 0.05 a
+    where a = (x1-y1)/(x1-y1-x2+y2)
 
 mixAtoms :: AtomCache -> AtomCache -> AtomCache
 mixAtoms ac0 ac1 = let
         [atom0, atom1] = map atomInCache [ac0, ac1]
-        xs = linearFix <$> prevEnergies atom0 <*> energies atom0 <*> prevEnergies atom1 <*> energies atom1
+        xs' = linearFix <$> prevEnergies atom0 <*> energies atom0 <*> prevEnergies atom1 <*> energies atom1
+        xs = (\x x' -> min x' (lerp 0.2 x x')) <$> smoothingFactors atom1 <*> xs'
         lerp x a b = case x of {0 -> a; 1 -> b; _ -> b*x + a*(1-x)}
         lerpxs f = lerp <$> xs <*> f atom0 <*> f atom1
         lerpsxs f = (zipWithLong 0 0 . lerp) <$> xs <*> f ac0 <*> f ac1
         occs = lerpxs occupations
         shields = lerpsxs shieldingPotentials
-    in --trace ("mixing: "++show xs) $
+    in trace ("mixing: "++show xs) $
     AtomCache
         atom1{
             energies = lerpxs energies,
             prevEnergies = lerpxs prevEnergies,
             occupations = occs,
+            smoothingFactors = xs,
             orbitals = lerpsxs (orbitals . atomInCache) -- This isn't normalised, but that shouldn't be a problem.
         }
         (foldr (zipWith (+)) (repeat 0) $ (map . (*)) <$> occs <*> shields)
@@ -266,7 +273,7 @@ mixAtoms ac0 ac1 = let
 
 startAtom :: AtomCache -- an atom such that (mixAtoms startAtom ~= id)
 startAtom = AtomCache
-    (Atom undefined undefined undefined undefined (emptyPO 0) (emptyPO (1e20)) (emptyPO []) (emptyPO 0))
+    (Atom undefined undefined undefined undefined (emptyPO 0) (emptyPO (1e20)) undefined (emptyPO []) (emptyPO 0))
     [] (emptyPO [])
 
 traceAtom :: Atom -> a -> a
@@ -283,15 +290,15 @@ updateAtomUntilConvergence = (\a -> traceAtom a a) . uauc' 0 startAtom . removeP
     where removePrevEnergies atom = atom{prevEnergies = emptyPO 0}
           uauc' n prev atom
               | atomsSimilar atom next           = next
-              | on (>) incorrectCharge next atom = if n >= 3 then next else uauc' (n+1) ac next
-              | otherwise                        = uauc' n ac next
-                  where next = traceAtom atom $ updateAtom (mixAtoms prev ac) (1/ fromIntegral (n+1)) False
-                        ac   = genAtomCache atom
+              | on (>) incorrectCharge next atom = if n >= 3 then next else uauc' (n+1) base next
+              | otherwise                        = uauc' n base next
+                  where next = traceAtom atom $ updateAtom base (1/ fromIntegral (n+1)) False
+                        base = mixAtoms prev $ genAtomCache atom
 
 
 
 adjacentElectronArrangements :: [(N, L, Int)] -> Int -> [[(N, L, Int)]]
-adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . þrd3)) $ (if errCharge > 0 then veryNegativeOthers ++ negativeOthers else []) ++ others ++ positiveOthers
+adjacentElectronArrangements ea eReq = traceShowId $ map (sortOn (\(n,l,_)->(l,n)) . filter ((>0) . þrd3)) $ (if errCharge > 0 then veryNegativeOthers ++ negativeOthers else []) ++ others ++ positiveOthers
     where eaByL = groupBy (on (==) snd3) $ sortOn snd3 ea
           maxL  = snd3 $ head $ last $ [(1,-1,0)] : eaByL
           nextL [] _ = ([], [])
@@ -306,7 +313,7 @@ adjacentElectronArrangements ea eReq = traceShowId $ map (sort . filter ((>0) . 
               where steps l = (*(l+1)^2) <$> [0,1,2]
                     oa' = filter (>0) $ map (+(-oa)) $ steps la
                     or' = filter (>0) $ map (or-   ) $ steps lr
-                    o'  = filter (<= min (maximum oa') (maximum or')) $ union oa' or'
+                    o'  = filter (<= min (maximum oa') (maximum or')) $ union (union oa' or') [1]
                     ea' = ea \\ [(na,la,oa),(nr,lr,or)]
                     newXs = (\o -> [(na,la,oa+o), (nr,lr,or-o)]) <$> o'
                     lla = 2*(la+1)^2

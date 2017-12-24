@@ -13,8 +13,8 @@ main = do
             [z, c] -> processAtom (read z) (parseSignedNumber c)
             _      -> putStrLn "too many arguments"
         "ea":args1 -> case args1 of
-            []     -> putStrLn "Argument required: max atomic number"
-            [z]    -> printEaTable (read z)
+            []     -> printEaTable Nothing
+            [z]    -> printEaTable $ Just $ read z
             _      -> putStrLn "too many arguments"
         [] -> putStrLn "Argument required: action (options: \"graph\", \"ea\")"
         x:_ -> putStrLn ("Argument not recognised: " ++ x)
