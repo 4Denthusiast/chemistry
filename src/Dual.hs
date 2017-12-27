@@ -1,13 +1,10 @@
 module Dual(
     Dual(..),
-    std,
     dual,
     DDouble,
 ) where
 
-data Dual n = Dual n n deriving (Eq)
-std :: Dual n -> n
-std (Dual a e) = a
+data Dual n = Dual{std::n, inf::n} deriving (Eq)
 
 type DDouble = Dual Double
 

@@ -1,0 +1,1 @@
+rm charts/*.svg

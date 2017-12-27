@@ -22,8 +22,10 @@ import Data.Bifunctor (first)
 import Data.Bits.Floating.Ulp
 
 import Debug.Trace
+import Data.IORef
+import System.IO.Unsafe
 traceShow1 :: Show a => a -> b -> b
-traceShow1 = const id
+traceShow1 = traceShow
 
 type Potential = ([Double], [Double]) -- The first list is the actual potential. The second if for the exchange energy, which can't be described simply as a potential.
 type Grid = [Double] -- radius sampling points
@@ -69,47 +71,75 @@ trimOrbital rs (vs,_) = map snd . trim3 . trim2 . trim1 . zip rs
 dropWhileEndExcept :: (a -> Bool) -> Int -> [a] -> [a]
 dropWhileEndExcept f n = (\(t, h) -> reverse h ++ take n (reverse t)) . span f . reverse
 
-principalNumber :: Grid -> DOrbital -> N
-principalNumber rs = length . filter head . group . map ((<0) . uncurry (*))
+principalNumber :: Grid -> Energy -> DOrbital -> N
+principalNumber rs e = length . group . map (\(r,(ψ, dψ)) -> inf ψ + (1 / (sqrt (-2*e)+1.5/r))* inf dψ > 0) . zip rs
 
 orbitalExists :: Grid -> Potential -> N -> Bool
-orbitalExists rs vs n = principalNumber rs orb >= n && (not $ null $ filter (<0) $ map fst $ orb)
+orbitalExists rs vs n = principalNumber rs 0 orb >= n && (not $ null $ filter (<0) $ map fst $ orb)
     where orb = trimmedOrbital rs vs 0
 
 findEnergy :: Grid -> Potential -> N -> Energy
 findEnergy = findEnergyHinted (-1)
 
 findEnergyHinted :: Energy -> Grid -> Potential -> N -> Energy
-findEnergyHinted e0 rs vs n = traceShow1 (e0, n) $ let
+findEnergyHinted e0 rs vs n = traceShow1 (e0, n) $ seq (clearOrbitals e0) $ seq (stashPotential vs) $ let
         e0' = min e0 (-1e-16)
         approxEq a b = abs (a-b) < 1e-12 * min (abs a) (abs b)
         iter :: Energy -> Energy -> Energy -> Energy
         iter e ll hh = traceShow1 [e,ll,hh] $ let
                 orbital      = trimmedOrbital rs vs e
                 ((ψ, dψ), r, v) = last $ zip3 orbital rs (fst vs)
-                roundError   = doubleUlp e * ((\(Dual _ x) -> x) ψ)
+                roundError   = doubleUlp e * (inf ψ)
                 roundWarning = if roundError * r > 0.01 then trace "Rounding error." else id
+                llhhError    = if ll > hh then error "Energy interval of negative size: ll > hh" else ()
                 err          = ψ + dual (1 / (sqrt (-2*e)+1.5/r))*dψ
                 e'           = let (Dual era ere) = err in max (e*1.6) $ min (e*0.6) $ e - era/ere
-                (ll', hh')
-                    |  ψ * ((-1)^n) > 0 = (ll,min hh e)
-                    | dψ * ((-1)^n) < 0 = (max ll e,hh)
-                    | e' < e            = (ll,min hh e)
-                    | otherwise         = (max ll e,hh)
+                (ll', hh')   = case mconcat [ --Calculate by cases whether the energy is too high or too low.
+                                   markOrd "n" $ compare n1 n,
+                                   --markOrd "s" $ max EQ $ compare ( ψ * ((-1)^n)) 0,
+                                   --markOrd "s" $ min EQ $ compare (dψ * ((-1)^n)) 0,
+                                   markOrd "e" $ compare e e'
+                               ] of
+                                   LT -> (max ll e,hh)
+                                   GT -> (ll,min hh e)
                 mid          = if isInfinite ll then 2*hh' else (hh'+ll')/2
-                n1           = principalNumber rs orbital
+                n1           = principalNumber rs e orbital
                 e''
                     | e > -1e-20     = 0
                     | approxEq e' e  = e
                     | approxEq ll hh = ll
-                    | e' >= hh       = traceShow1 'h' $ iter mid ll' hh' -- If it's no better than it was before, default to binary search.
-                    | e' <= ll       = traceShow1 'l' $ iter mid ll' hh'
-                    | n1 < n         = traceShow1 n1 $ traceShow1 n $ iter (0.3^(n-n1) * max e ll) (0.7 * max e ll) hh
-                    | n1 > n         = traceShow1 n1 $ traceShow1 n $ iter (2.5^(n1-n) * min e hh) ll (1.4 * min e hh)
+                    | max e e' >= hh = traceShow1 'h' $ iter mid ll' hh' -- If it's no better than it was before, default to binary search.
+                    | min e e' <= ll = traceShow1 'l' $ iter mid ll' hh'
+                    | n1 < n         = traceShow1 n1 $ traceShow1 n $ iter (0.3^(n-n1) * max e ll) ll' hh'
+                    | n1 > n         = traceShow1 n1 $ traceShow1 n $ iter (2.5^(n1-n) * min e hh) ll' hh'
                     | otherwise      = iter e' ll' hh'
-            in roundWarning e''
+            in seq (stashOrbital orbital) $ seq llhhError $ roundWarning e''
     in
         if orbitalExists rs vs n then iter e0' (-1/0) 0 else 0
+
+markOrd :: String -> Ordering -> Ordering
+markOrd s o  = case o of {LT -> traceShow1 (s++"<") LT; GT -> traceShow1 (s++">") GT; EQ -> EQ}
+
+potentialBox :: IORef Potential
+potentialBox = unsafePerformIO $ newIORef ([],[])
+
+stashPotential :: Potential -> ()
+stashPotential = unsafePerformIO . writeIORef potentialBox
+
+getStashPotential :: () -> Potential
+getStashPotential () = unsafePerformIO $ readIORef potentialBox
+
+orbitalBox :: IORef [DOrbital]
+orbitalBox = unsafePerformIO $ newIORef []
+
+clearOrbitals :: a -> ()
+clearOrbitals a = unsafePerformIO $ writeIORef orbitalBox (seq a [])
+
+stashOrbital :: DOrbital -> ()
+stashOrbital o = unsafePerformIO $ modifyIORef orbitalBox (take 20 . (o:))
+
+getStashOrbitals :: () -> [DOrbital]
+getStashOrbitals () = unsafePerformIO $ readIORef orbitalBox
 
 realOrbital :: Grid -> Potential -> Energy -> Orbital
 realOrbital rs vs e = map (std . fst) $ trimmedOrbital rs vs e

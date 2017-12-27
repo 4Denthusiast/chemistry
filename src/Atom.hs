@@ -290,10 +290,11 @@ updateAtomUntilConvergence = (\a -> traceAtom a a) . uauc' 0 startAtom . removeP
     where removePrevEnergies atom = atom{prevEnergies = emptyPO 0}
           uauc' n prev atom
               | atomsSimilar atom next           = next
-              | on (>) incorrectCharge next atom = if n >= 3 then next else uauc' (n+1) base next
+              | on (>) incorrectCharge next atom = seq s2er $ if n >= 3 then next else uauc' (n+1) base next
               | otherwise                        = uauc' n base next
                   where next = traceAtom atom $ updateAtom base (1/ fromIntegral (n+1)) False
                         base = mixAtoms prev $ genAtomCache atom
+                        s2er = if getPO (occupations next) 2 0 == 0 && getPO (occupations atom) 2 0 > 0 then error "2s esscaped." else ()
 
 
 
