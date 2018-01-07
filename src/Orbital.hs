@@ -17,6 +17,7 @@ module Orbital(
 ) where
 
 import Dual
+import Utils
 import Data.List
 import Data.Bifunctor (first)
 import Data.Bits.Floating.Ulp
@@ -25,7 +26,7 @@ import Debug.Trace
 import Data.IORef
 import System.IO.Unsafe
 traceShow1 :: Show a => a -> b -> b
-traceShow1 = traceShow
+traceShow1 = const id
 
 type Potential = ([Double], [Double]) -- The first list is the actual potential. The second if for the exchange energy, which can't be described simply as a potential.
 type Grid = [Double] -- radius sampling points
@@ -38,7 +39,7 @@ data Spin = Up | Down deriving (Eq, Ord, Enum)
 instance Show Spin where{show Up = "↑"; show Down = "↓"}
 
 logGrid :: Double -> Double -> Grid
-logGrid spacing z = iterate (* (1 + spacing)) (max 0.4 $ log (slimConstant/coulumb'sConstant) - 3/(sqrt z +1))
+logGrid spacing z = iterate (* (1 + spacing)) (max 0.3 $ log (slimConstant/coulumb'sConstant) - 3/(sqrt z +1))
 
 -- The effective potential purely from nuclear charge and angular momentum
 basePotential :: Grid -> Double -> Double -> Potential
@@ -46,8 +47,8 @@ basePotential grid l charge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce
     where coulumbForce r = charge * (-coulumb'sConstant + slimConstant / exp r) / (r*r)
 
 coulumb'sConstant, slimConstant :: Double
-coulumb'sConstant = 0.7
-slimConstant = coulumb'sConstant * 1.71
+coulumb'sConstant = 0.9
+slimConstant = coulumb'sConstant * 1.8
 
 -- Calculates the orbital with the fixed energy value.
 singleOrbital :: Grid -> Potential -> Energy -> DOrbital
@@ -63,7 +64,7 @@ trimmedOrbital rs vs e = trimOrbital rs vs $ singleOrbital rs vs e
 trimOrbital :: Grid -> Potential -> DOrbital -> DOrbital
 trimOrbital rs (vs,_) = map snd . trim3 . trim2 . trim1 . zip rs
     where trim1 rψs = takeWhile (\(r, (ψ, _)) -> abs (std ψ) * r < 3*threshold rψs) rψs
-          thresholdPoint = (2*) $ snd $ head $ filter (\(v, r) -> v < 0 || r > 8) $ zip vs rs
+          thresholdPoint = (2*) $ þrd3 $ head $ filter (\(v, v', r) -> v < v' || r > 8) $ zip3 vs (tail vs) rs
           threshold = maximum . map (\(r, (ψ, _)) -> abs (std ψ) * r) . takeWhile ((< thresholdPoint) . fst)
           trim2 = takeWhile (\(r, (ψ, dψ)) -> r < 2 || r^2 * (3*(std ψ)^2 + (std ψ + std dψ * r)^2) > 1e-4)
           trim3 = dropWhileEndExcept (\(r, (ψ, dψ)) -> ψ * dψ > 0 && r > 3) 150
@@ -82,7 +83,7 @@ findEnergy :: Grid -> Potential -> N -> Energy
 findEnergy = findEnergyHinted (-1)
 
 findEnergyHinted :: Energy -> Grid -> Potential -> N -> Energy
-findEnergyHinted e0 rs vs n = traceShow1 (e0, n) $ seq (clearOrbitals e0) $ seq (stashPotential vs) $ let
+findEnergyHinted e0 rs vs n = traceShow1 (e0, n) $ seq (stashPotential vs) $ let
         e0' = min e0 (-1e-16)
         approxEq a b = abs (a-b) < 1e-12 * min (abs a) (abs b)
         iter :: Energy -> Energy -> Energy -> Energy
@@ -113,7 +114,7 @@ findEnergyHinted e0 rs vs n = traceShow1 (e0, n) $ seq (clearOrbitals e0) $ seq 
                     | n1 < n         = traceShow1 n1 $ traceShow1 n $ iter (0.3^(n-n1) * max e ll) ll' hh'
                     | n1 > n         = traceShow1 n1 $ traceShow1 n $ iter (2.5^(n1-n) * min e hh) ll' hh'
                     | otherwise      = iter e' ll' hh'
-            in seq (stashOrbital orbital) $ seq llhhError $ roundWarning e''
+            in seq llhhError $ roundWarning e''
     in
         if orbitalExists rs vs n then iter e0' (-1/0) 0 else 0
 
@@ -128,18 +129,6 @@ stashPotential = unsafePerformIO . writeIORef potentialBox
 
 getStashPotential :: () -> Potential
 getStashPotential () = unsafePerformIO $ readIORef potentialBox
-
-orbitalBox :: IORef [DOrbital]
-orbitalBox = unsafePerformIO $ newIORef []
-
-clearOrbitals :: a -> ()
-clearOrbitals a = unsafePerformIO $ writeIORef orbitalBox (seq a [])
-
-stashOrbital :: DOrbital -> ()
-stashOrbital o = unsafePerformIO $ modifyIORef orbitalBox (take 20 . (o:))
-
-getStashOrbitals :: () -> [DOrbital]
-getStashOrbitals () = unsafePerformIO $ readIORef orbitalBox
 
 realOrbital :: Grid -> Potential -> Energy -> Orbital
 realOrbital rs vs e = map (std . fst) $ trimmedOrbital rs vs e
