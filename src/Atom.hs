@@ -124,7 +124,7 @@ incrementAtom :: Atom -> Atom
 incrementAtom atom = relaxAtom $ copyAtom' atom 1 0
 
 cationise :: Atom -> Atom
-cationise atom = relaxAtom $ copyAtom' atom 0 1
+cationise atom = relaxAtom' $ copyAtom' atom 0 1 where relaxAtom' a = if incorrectCharge a < 0 then relaxAtom a else a
 anionise  :: Atom -> Atom
 anionise  atom = relaxAtom $ copyAtom' atom 0 (-1)
 
@@ -249,7 +249,7 @@ linearFix x1 y1 x2 y2
     | otherwise               = max 0.05 a
     where a = (x1-y1)/(x1-y1-x2+y2)
 
-mixAtoms :: AtomCache -> AtomCache -> AtomCache
+mixAtoms :: AtomCache -> AtomCache -> (PerOrbital Double, AtomCache)
 mixAtoms ac0 ac1 = let
         [atom0, atom1] = map atomInCache [ac0, ac1]
         xs' = linearFix <$> prevEnergies atom0 <*> energies atom0 <*> prevEnergies atom1 <*> energies atom1
@@ -259,8 +259,8 @@ mixAtoms ac0 ac1 = let
         lerpsxs f = (zipWithLong 0 0 . lerp) <$> xs <*> f ac0 <*> f ac1
         occs = lerpxs occupations
         shields = lerpsxs shieldingPotentials
-    in trace ("mixing: "++show xs) $
-    AtomCache
+    in --trace ("mixing: "++show xs) $
+    (xs, AtomCache
         atom1{
             energies = lerpxs energies,
             prevEnergies = lerpxs prevEnergies,
@@ -270,6 +270,7 @@ mixAtoms ac0 ac1 = let
         }
         (foldr (zipWith (+)) (repeat 0) $ (map . (*)) <$> occs <*> shields)
         shields
+    )
 
 startAtom :: AtomCache -- an atom such that (mixAtoms startAtom ~= id)
 startAtom = AtomCache
@@ -277,23 +278,48 @@ startAtom = AtomCache
     [] (emptyPO [])
 
 traceAtom :: Atom -> a -> a
-traceAtom atom = traceShow (energies atom) . traceShow (occupations atom) . {-traceShow (carefulEnergies atom) .-} trace (prettifyElectronArrangement atom $ occsToEA $ forcedOccs atom) . trace (prettyElectronArrangement atom ++ "\n")
+traceAtom atom = trace ('E':show (totalEnergy atom)) . trace (prettifyElectronArrangement atom $ occsToEA $ forcedOccs atom) . trace (prettyElectronArrangement atom ++ "\n")
 
-atomsSimilar :: Atom -> Atom -> Bool
-atomsSimilar a0 a1 = occupations a0 == occupations a1 &&
-                     (all id (similarEnergies <$> (energies a0) <*> (energies a1) <*> boolOccs))
-    where similarEnergies e0 e1 occupied = (not occupied && e0<1e-8 && e1==0) || abs (e0-e1) <= min 0.001 (0.01*abs (e0+e1))
-          boolOccs = fmap (>0) (occupations a0)
+atomsSimilarity :: Atom -> Atom -> PerOrbital Double -> Energy
+atomsSimilarity a0 a1 ms = if occupations a0 /= occupations a1 then 1/0 else
+                     abs (sum $ energies a0) * maximum' (liftA3 (\a b m -> abs ((a-b) / max a b / m)) (trimPO $ energies a0) (trimPO $ energies a1) ms)
+    where maximum' es = if null (poToList es) then 0 else maximum $ fmap (\x -> if isNaN x then 0 else x) es
 
-updateAtomUntilConvergence :: Atom -> Atom
-updateAtomUntilConvergence = (\a -> traceAtom a a) . uauc' 0 startAtom . removePrevEnergies
+-- All of the data needed at each step of iterating an atom.
+data AtomConvergent = AtomConvergent Energy Int AtomCache Atom
+
+atomFromConvergent (AtomConvergent _ _ _ a) = a
+
+startAtomConvergent :: Atom -> AtomConvergent
+startAtomConvergent = AtomConvergent (1/0) 0 startAtom . removePrevEnergies
     where removePrevEnergies atom = atom{prevEnergies = emptyPO 0}
-          uauc' n prev atom
-              | atomsSimilar atom next           = next
-              | on (>) incorrectCharge next atom = if n >= 3 then next else uauc' (n+1) base next
-              | otherwise                        = uauc' n base next
-                  where next = traceAtom atom $ updateAtom base (1/ fromIntegral (n+1)) False
-                        base = mixAtoms prev $ genAtomCache atom
+
+updateAtomConvergent :: AtomConvergent -> Maybe AtomConvergent
+updateAtomConvergent (AtomConvergent _ n prev atom)
+    | on (>) incorrectCharge next atom = if n >= 3 then Nothing else Just $ traces $ AtomConvergent de (n+1) base next
+    | otherwise                        = Just $ traces $ AtomConvergent de n base next
+        where next       = updateAtom base (1/ fromIntegral (n+1)) False
+              (ms, base) = mixAtoms prev $ genAtomCache atom
+              de         = atomsSimilarity atom next ms
+              traces     = traceShow de . traceAtom atom
+
+compareConvergents :: AtomConvergent -> AtomConvergent -> (Ordering, Maybe AtomConvergent, Maybe AtomConvergent)
+compareConvergents c0@(AtomConvergent de0 _ _ a0) c1@(AtomConvergent de1 _ _ a1)
+    | de0 + de1 < min 0.1 (abs (e0 - e1)) = (compare (q0, e0) (q1, e1), Just c0, Just c1)
+    | otherwise      = case next of
+        (Just c0', Just c1') -> compareConvergents c0' c1'
+        (Nothing , Just c1') -> (GT, Nothing, Just c1')
+        (Just c0', Nothing ) -> (LT, Just c0', Nothing)
+        (Nothing , Nothing ) -> (EQ, Nothing, Nothing)
+    where [e0, e1] = map totalEnergy [a0, a1]
+          [q0, q1] = map (max 0 . negate . incorrectCharge) [a0,a1]
+          next
+              | de0 > 2*de1 = (updateAtomConvergent c0,                 Just c1)
+              | de1 > 2*de0 = (                Just c0, updateAtomConvergent c1)
+              | otherwise   = (updateAtomConvergent c0, updateAtomConvergent c1)
+
+convergeToThreshold :: Energy -> AtomConvergent -> Maybe Atom
+convergeToThreshold e c@(AtomConvergent e0 _ _ a) = if e0 <= e then Just a else convergeToThreshold e =<< (updateAtomConvergent c)
 
 
 
@@ -329,14 +355,18 @@ atomAdjEAs :: Atom -> [[(N, L, Int)]]
 atomAdjEAs atom = adjacentElectronArrangements (electronArrangement atom) (electronsRequired atom)
 
 relaxAtom :: Atom -> Atom
-relaxAtom atom = relax' (updateAtomUntilConvergence atom) S.empty
-    where relax' bestA triedEAs = case as of {[] -> bestA; (bestA':_) -> relax' bestA' triedEAs'}
-              where nextEAs = filter (flip S.notMember triedEAs) $ atomAdjEAs bestA
-                    nextAtomInits = sortOn (\a -> (abs $ forcedIncorrectCharge a, totalEnergy a)) $ map (forceEA $ updateAtom (genAtomCache bestA) 0.3 True) nextEAs
-                    nextAtoms = map updateAtomUntilConvergence nextAtomInits
-                    (failedAtoms, as) = span (not . better) nextAtoms
-                    better a = correctEA a && on (<) (\a' -> (max 0 (-incorrectCharge a'), totalEnergy a')) a bestA
-                    triedEAs' = S.union triedEAs $ S.fromList $ map forcedEA $ bestA : failedAtoms
+relaxAtom atom = fromMaybe (error "Atom previously thought best has failed to converge (2).") $ convergeToThreshold 0.0001 $ relax' (startAtomConvergent atom) S.empty
+    where relax' bestA triedEAs = if done then bestA' else relax' bestA' triedEAs'
+              where bestAt  = atomFromConvergent bestA
+                    nextEAs = filter (flip S.notMember triedEAs) $ atomAdjEAs bestAt
+                    nextAtoms = sortOn (\a -> (abs $ forcedIncorrectCharge a, totalEnergy a)) $ map (forceEA $ updateAtom (genAtomCache bestAt) 0.3 True) nextEAs
+                    tryAtoms ba [] f = (f, ba, True)
+                    tryAtoms ba (a:as) f = case compareConvergents (startAtomConvergent a) ba of
+                        (LT, Just ba', _) -> (f, ba', False)
+                        (_, _, Just ba') -> tryAtoms ba' as (a:f)
+                        (_, Nothing, Nothing) -> error "Atom previously thought best has failed to converge (1)."
+                    (failedAtoms, bestA', done) = tryAtoms bestA nextAtoms []
+                    triedEAs' = S.union triedEAs $ S.fromList $ map forcedEA $ bestAt : failedAtoms
                     forcedIncorrectCharge a = electronsRequired a - sum (forcedOccs a)
 
 makeAtom :: Int -> Int -> Atom
