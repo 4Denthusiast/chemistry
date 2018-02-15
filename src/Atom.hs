@@ -296,12 +296,15 @@ startAtomConvergent = AtomConvergent (1/0) 0 startAtom . removePrevEnergies
 
 updateAtomConvergent :: AtomConvergent -> Maybe AtomConvergent
 updateAtomConvergent (AtomConvergent _ n prev atom)
-    | on (>) incorrectCharge next atom = if n >= 3 then Nothing else Just $ traces $ AtomConvergent de (n+1) base next
+    | on worse incorrectChargeFromForced next atom = traces $ if n >= 3 then Nothing else Just $ AtomConvergent de (n+1) base next
     | otherwise                        = Just $ traces $ AtomConvergent de n base next
         where next       = updateAtom base (1/ fromIntegral (n+1)) False
               (ms, base) = mixAtoms prev $ genAtomCache atom
               de         = atomsSimilarity atom next ms
-              traces     = traceShow de . traceAtom atom
+              traces     = traceShow de . traceAtom next
+              incorrectChargeFromForced a = fromIntegral (sum $ forcedOccs a) - sum (occupations a)
+              worse 0 0  = False
+              worse a b  = a >= b
 
 compareConvergents :: AtomConvergent -> AtomConvergent -> (Ordering, Maybe AtomConvergent, Maybe AtomConvergent)
 compareConvergents c0@(AtomConvergent de0 _ _ a0) c1@(AtomConvergent de1 _ _ a1)
