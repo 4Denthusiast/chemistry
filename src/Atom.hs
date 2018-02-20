@@ -10,6 +10,8 @@ module Atom(
     indices,
     emptyAtom,
     makeAtom,
+    makeAtomWithEA,
+    makeAtomTrustingEA,
     electronsRequired,
     incorrectCharge,
     updateAtom,
@@ -169,7 +171,7 @@ prettifyElectronArrangement atom ea = (unwords $ map (\(n, l, o) -> show (n+l) +
 
 
 genShieldingPotential :: Grid -> Orbital -> [Double]
-genShieldingPotential rs ψs = map (* coulumb'sConstant) $ zipWith (+) vOut vIn
+genShieldingPotential rs ψs = if null ψs then repeat 0 else map (* coulumb'sConstant) $ zipWith (+) vOut vIn
     where d     = zipWith3 (\ψ r r' -> ψ^2 * r^3 * (r' - r)) ψs rs (tail rs)
           invSq = zipWith (\r x -> x/(r^2)) rs
           vOut  = (scanr (+) 0 $ invSq d) ++ repeat 0
@@ -259,7 +261,7 @@ mixAtoms ac0 ac1 = let
         lerpsxs f = (zipWithLong 0 0 . lerp) <$> xs <*> f ac0 <*> f ac1
         occs = lerpxs occupations
         shields = lerpsxs shieldingPotentials
-    in --trace ("mixing: "++show xs) $
+    in -- trace ("mixing: "++show xs) $
     (xs, AtomCache
         atom1{
             energies = lerpxs energies,
@@ -278,7 +280,7 @@ startAtom = AtomCache
     [] (emptyPO [])
 
 traceAtom :: Atom -> a -> a
-traceAtom atom = trace ('E':show (totalEnergy atom)) . trace (prettifyElectronArrangement atom $ occsToEA $ forcedOccs atom) . trace (prettyElectronArrangement atom ++ "\n")
+traceAtom atom = trace ('E':show (totalEnergy atom)) . {- traceShow (energies atom) . -} trace (prettifyElectronArrangement atom $ occsToEA $ forcedOccs atom) . trace (prettyElectronArrangement atom ++ "\n")
 
 atomsSimilarity :: Atom -> Atom -> PerOrbital Double -> Energy
 atomsSimilarity a0 a1 ms = if occupations a0 /= occupations a1 then 1/0 else
@@ -355,7 +357,7 @@ adjacentElectronArrangements ea eReq = traceShowId $ map (sortOn (\(n,l,_)->(l,n
           veryNegativeOthers = map (\(n,l,o,o') -> chargedEA o' (n,l,o)) $ filter ((>1) . frþ4) $ (\(n,l,o) -> (n,l,o,min errCharge $ 2*(l+1)^2-o)) <$> additionFrontier
           
 atomAdjEAs :: Atom -> [[(N, L, Int)]]
-atomAdjEAs atom = adjacentElectronArrangements (electronArrangement atom) (electronsRequired atom)
+atomAdjEAs atom = adjacentElectronArrangements (forcedEA atom) (electronsRequired atom)
 
 relaxAtom :: Atom -> Atom
 relaxAtom atom = fromMaybe (error "Atom previously thought best has failed to converge (2).") $ convergeToThreshold 0.0001 $ relax' (startAtomConvergent atom) S.empty
@@ -374,3 +376,9 @@ relaxAtom atom = fromMaybe (error "Atom previously thought best has failed to co
 
 makeAtom :: Int -> Int -> Atom
 makeAtom z c = relaxAtom $ emptyAtom z c
+
+makeAtomWithEA :: Int -> Int -> [(N,L,Int)] -> Atom
+makeAtomWithEA z c ea = relaxAtom $ forceEA (emptyAtom z c) ea
+
+makeAtomTrustingEA :: Int -> Int -> [(N,L,Int)] -> Atom
+makeAtomTrustingEA z c ea = fromMaybe (error "Atom with cached E.A. failed to converge.") $ convergeToThreshold 0.0001 $ startAtomConvergent $ forceEA (emptyAtom z c) ea

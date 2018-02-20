@@ -6,7 +6,7 @@ import Lib
 main :: IO ()
 main = do
     args <- getArgs
-    case args of
+    case filter ((/= '-') . head) args of
         "graph":args1 -> case args1 of
             [] -> putStrLn "Argument required: atomic number"
             [z]    -> processAtom (read z) 0

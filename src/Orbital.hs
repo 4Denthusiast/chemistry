@@ -64,7 +64,7 @@ trimmedOrbital rs vs e = trimOrbital rs vs $ singleOrbital rs vs e
 trimOrbital :: Grid -> Potential -> DOrbital -> DOrbital
 trimOrbital rs (vs,_) = map snd . trim3 . trim2 . trim1 . zip rs
     where trim1 rψs = takeWhile (\(r, (ψ, _)) -> abs (std ψ) * r < 3*threshold rψs) rψs
-          thresholdPoint = (2*) $ þrd3 $ head $ filter (\(v, v', r) -> v < v' || r > 8) $ zip3 vs (tail vs) rs
+          thresholdPoint = (2*) $ þrd3 $ labHead "trimOrbital" $ filter (\(v, v', r) -> v < v' || r > 8) $ zip3 vs (tail vs) rs
           threshold = maximum . map (\(r, (ψ, _)) -> abs (std ψ) * r) . takeWhile ((< thresholdPoint) . fst)
           trim2 = takeWhile (\(r, (ψ, dψ)) -> r < 2 || r^2 * (3*(std ψ)^2 + (std ψ + std dψ * r)^2) > 1e-4)
           trim3 = dropWhileEndExcept (\(r, (ψ, dψ)) -> ψ * dψ > 0 && r > 3) 150

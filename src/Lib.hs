@@ -6,9 +6,11 @@ module Lib(
 import Atom
 import AtomEnergy
 import Graphing
+import Cache
 
 processAtom :: Int -> Int -> IO ()
-processAtom z c = let atom = makeAtom z c in do
+processAtom z c = do
+    atom <- makeAtomUsingCache z c
     putStrLn $ prettyElectronArrangement atom
     let energy = totalEnergy atom
         ions   = reverse $ reverse (anionsOf atom) ++ cationsOf atom
@@ -27,9 +29,15 @@ showIon :: Double -> Atom -> String
 showIon e0 ion = (if charge ion >= 0 then "+" else "") ++ show (charge ion) ++ ": " ++ show (e0 - totalEnergy ion)
 
 printEaTable :: Maybe Int -> IO ()
-printEaTable = mapM_ processElement . flip (maybe id take) aperiodicTable
-    where processElement a = do
-            putStr $ show $ atomicNumber a
-            putStr ":  "
-            putStrLn $ prettyElectronArrangement a
-            graphAtom a
+printEaTable n = mapM_ processElement =<< (maybe id take n <$> atoms)
+    where processElement a' = do
+              a <- a'
+              putStr $ show $ atomicNumber a
+              putStr ":  "
+              putStrLn $ prettyElectronArrangement a
+              graphAtom a
+          atoms = do
+              cm <- getCacheMode
+              return $ case cm of
+                  NoCache -> map return aperiodicTable
+                  _       -> map (flip makeAtomUsingCache 0) [1..]

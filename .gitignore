@@ -1,3 +1,4 @@
 .stack-work
 charts/*.svg
 chart.svg
+cache.csv

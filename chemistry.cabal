@@ -15,6 +15,7 @@ library
                        AtomEnergy,
                        Polynomial,
                        OrbitalShape,
+                       Cache,
                        Utils
   build-depends:       base >= 4.7 && < 5,
                        Chart,

@@ -7,8 +7,12 @@ module Utils(
     uncurry3,
     map2,
     map3,
-    zipWithLong
+    zipWithLong,
+    cmdHasOption,
+    labHead
 ) where
+
+import System.Environment
 
 fst3 :: (a, b, c) -> a
 fst3 (x, _, _) = x
@@ -44,3 +48,10 @@ zipWithLong :: a -> b -> (a -> b -> c) -> [a] -> [b] -> [c]
 zipWithLong xr yr f [] ys = map (f xr) ys
 zipWithLong xr yr f xs [] = map (flip f yr) xs
 zipWithLong xr yr f (x:xs) (y:ys) = f x y : zipWithLong xr yr f xs ys
+
+cmdHasOption :: Char -> IO Bool
+cmdHasOption c = (elem c . concat . map tail . filter ((=='-') . head)) <$> getArgs
+
+labHead :: String -> [a] -> a
+labHead s [] = error ("labHead: empty list at " ++ s)
+labHead _ (x:_) = x
