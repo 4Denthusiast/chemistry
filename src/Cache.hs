@@ -26,7 +26,7 @@ loadCache = map splitCommas <$> catchIOError (withFile "cache.csv" ReadMode hGet
 readEA :: String -> Maybe [(N,L,Int)]
 readEA "" = Nothing
 readEA s = Just $ map readPart $ words s
-    where readPart (n:l:'^':o) = (read [n], fromMaybe (error ("Invalid angular momentum label in cache file: "++[l])) $ elemIndex l angularMomentumLabels, read o)
+    where readPart (n:l:'^':o) = let l' = fromMaybe (error ("Invalid angular momentum label in cache file: "++[l])) $ elemIndex l angularMomentumLabels in (read [n] - l', l', read o)
           readPart s = error ("Invalid electron arrangement sytax in cache file: " ++ s)
 
 -- The bool output is whether the returned e.a. is for exactly the requested z & charge.

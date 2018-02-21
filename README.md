@@ -10,6 +10,7 @@ An incomplete program for calculating properties of 4D atoms with an additional 
 4. run
   * To print properties of a specific atom (with charge in the format "n" or "n-"): `$ stack run chemistry graph <atomic number> [<charge>]`
   * To calculate the electron arrangements of all elements up to a specified atomic number: `$ stack run chemistry ea <atomic number>`
+  * With the option -i, cached electron arrangements are ignored. With -t, their correctness is assumed, to save time checking them.
 
 ## Features
 
