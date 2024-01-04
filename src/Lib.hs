@@ -25,7 +25,7 @@ anionsOf :: Atom -> IO [Atom]
 anionsOf atom = do
     cm <- getCacheMode
     case cm of
-        NoCache -> return $ takeWhile ((==0) . incorrectCharge) $ iterate anionise atom
+        NoCache -> return $ takeWhile ((==0) . incorrectCharge) $ tail $ iterate anionise atom
         _ -> takeWhileM ((==0) . incorrectCharge) $ map (makeAtomUsingCache (atomicNumber atom) . (charge atom -)) [1..]
 
 cationsOf :: Atom -> IO [Atom]
@@ -33,7 +33,7 @@ cationsOf atom = do
         cm <- getCacheMode
         case cm of
             NoCache -> return $ takeWhile valid $ tail $ iterate cationise atom
-            _ -> takeWhileM valid $ map (makeAtomUsingCache (atomicNumber atom)) [charge atom..atomicNumber atom]
+            _ -> takeWhileM valid $ map (makeAtomUsingCache (atomicNumber atom)) [charge atom+1..atomicNumber atom]
     where valid ion = charge ion < atomicNumber ion && totalEnergy ion < totalEnergy atom + 0.07
 
 takeWhileM :: Monad m => (a -> Bool) -> [m a] -> m [a]
@@ -50,6 +50,8 @@ printEaTable n = mapM_ processElement =<< (maybe id take n <$> atoms)
               putStr $ show $ atomicNumber a
               putStr ":  "
               putStrLn $ prettyElectronArrangement a
+              putStrLn $ show $ energies a
+              putStrLn $ show $ orbitalRadii a
               graphAtom a
           atoms = do
               cm <- getCacheMode

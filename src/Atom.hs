@@ -21,7 +21,8 @@ module Atom(
     angularMomentumLabels,
     aperiodicTable,
     anionise,
-    cationise
+    cationise,
+    orbitalRadii
 ) where
 
 import Orbital
@@ -34,7 +35,12 @@ import qualified Data.Set as S
 import Data.Function
 import Data.Maybe
 import Data.Bifunctor (first, second)
-import Debug.Trace
+import qualified Debug.Trace as Trace
+trace :: String -> a -> a
+trace = Trace.trace
+traceShow :: Show a => a -> b -> b
+traceShow = (trace . show)
+traceShowId x = traceShow x x
 
 
 angularMomentumLabels = "spdfghi" ++ (['k'..'z'] \\ "sp") ++ repeat 'R' -- "R" for "Rydberg".
@@ -132,6 +138,9 @@ anionise  atom = relaxAtom $ copyAtom' atom 0 (-1)
 
 aperiodicTable :: [Atom]
 aperiodicTable = iterate incrementAtom (makeAtom 1 0)
+
+orbitalRadii :: Atom -> PerOrbital Double
+orbitalRadii a = sum <$> zipWith3 (\r r' ψ -> (r'-r) * r^4 * ψ^2) (atomGrid a) (tail $ atomGrid a) <$> orbitals a
 
 
 
@@ -280,7 +289,7 @@ startAtom = AtomCache
     [] (emptyPO [])
 
 traceAtom :: Atom -> a -> a
-traceAtom atom = trace ('E':show (totalEnergy atom)) . {- traceShow (energies atom) . -} trace (prettifyElectronArrangement atom $ occsToEA $ forcedOccs atom) . trace (prettyElectronArrangement atom ++ "\n")
+traceAtom atom = {- trace ('E':show (totalEnergy atom)) . traceShow (energies atom) . -} trace (prettifyElectronArrangement atom $ occsToEA $ forcedOccs atom) . trace (prettyElectronArrangement atom ++ "\n")
 
 atomsSimilarity :: Atom -> Atom -> PerOrbital Double -> Energy
 atomsSimilarity a0 a1 ms = if occupations a0 /= occupations a1 then 1/0 else
@@ -308,9 +317,13 @@ updateAtomConvergent (AtomConvergent _ n prev atom)
               worse 0 0  = False
               worse a b  = a >= b
 
+updateConvergentUntilBetter :: AtomConvergent -> Maybe AtomConvergent
+updateConvergentUntilBetter ac0@(AtomConvergent de0 _ _ _) = iter ac0
+    where iter ac@(AtomConvergent de _ _ _) = if de < de0 then Just ac else updateAtomConvergent ac >>= iter
+
 compareConvergents :: AtomConvergent -> AtomConvergent -> (Ordering, Maybe AtomConvergent, Maybe AtomConvergent)
 compareConvergents c0@(AtomConvergent de0 _ _ a0) c1@(AtomConvergent de1 _ _ a1)
-    | de0 + de1 < min 0.1 (abs (e0 - e1)) = (compare (q0, e0) (q1, e1), Just c0, Just c1)
+    | on (&&) (de0 + de1 <) 0.1 (abs (e0 - e1)) = (compare (q0, e0) (q1, e1), Just c0, Just c1)
     | otherwise      = case next of
         (Just c0', Just c1') -> compareConvergents c0' c1'
         (Nothing , Just c1') -> (GT, Nothing, Just c1')
@@ -319,9 +332,9 @@ compareConvergents c0@(AtomConvergent de0 _ _ a0) c1@(AtomConvergent de1 _ _ a1)
     where [e0, e1] = map totalEnergy [a0, a1]
           [q0, q1] = map (max 0 . negate . incorrectCharge) [a0,a1]
           next
-              | de0 > 2*de1 = (updateAtomConvergent c0,                 Just c1)
-              | de1 > 2*de0 = (                Just c0, updateAtomConvergent c1)
-              | otherwise   = (updateAtomConvergent c0, updateAtomConvergent c1)
+              | de0 > 2*de1 = (updateConvergentUntilBetter c0,                        Just c1)
+              | de1 > 2*de0 = (                       Just c0, updateConvergentUntilBetter c1)
+              | otherwise   = (updateConvergentUntilBetter c0, updateConvergentUntilBetter c1)
 
 convergeToThreshold :: Energy -> AtomConvergent -> Maybe Atom
 convergeToThreshold e c@(AtomConvergent e0 _ _ a) = if e0 <= e then Just a else convergeToThreshold e =<< (updateAtomConvergent c)
