@@ -31,15 +31,23 @@
             <img id="chart" style="height:100%;"/>
         </div>
         <div style="flex:0;">
-            <button id="left" onclick="left()">&lt;</button>
-            <input id="input" type="number" id="Z" onchange="setZ(this.value)">
-            <button onclick="right()">&gt;</button>
+            <button id="zLeft" onclick="zDown()">&lt;</button>
+            <label>Z: <input id="zInput" type="number" onchange="setZ(this.value)"></label>
+            <button onclick="zUp()">&gt;</button>
+        </div>
+        <div style="flex:0;">
+            <button id="aLeft" onclick="aDown()">&lt;</button>
+            <label>A: <input id="aInput" type="number" onchange="setA(this.value)"></label>
+            <button onclick="aUp()">&gt;</button>
         </div>
         <script>
             var atomicNumber = 1;
-            const inputEl = document.getElementById("input");
-            const chartEl = document.getElementById("chart");
-            const  leftEl = document.getElementById("left");
+            var massNumber = 2;
+            const chartEl  = document.getElementById("chart");
+            const zInputEl = document.getElementById("zInput");
+            const zLeftEl  = document.getElementById("zLeft");
+            const aInputEl = document.getElementById("aInput");
+            const aLeftEl  = document.getElementById("aLeft");
             
             {
                 let params = (new URL(location)).searchParams;
@@ -47,22 +55,47 @@
                     setZ(params.get("Z"));
                 else
                     setZ(1);
+                if(params.has("A"))
+                    setA(params.get("A"));
+                else
+                    setA(2);
             }
             
-            function left(){
+            function zDown(){
+                if(massNumber >= atomicNumber)
+                    setA(Math.max(1, atomicNumber - 1, massNumber - 2));
                 if(atomicNumber > 1)
                     setZ(atomicNumber - 1);
             }
             
-            function right(){
+            function zUp(){
+                setA(massNumber + 2);
                 setZ(atomicNumber + 1);
             }
             
             function setZ(z){
                 atomicNumber = z*1;
-                inputEl.value = atomicNumber;
-                chartEl.src = atomicNumber+".svg";
-                leftEl.disabled = atomicNumber <= 1;
+                zInputEl.value = atomicNumber;
+                chartEl.src = "Z"+atomicNumber+"A"+massNumber+".svg";
+                zLeftEl.disabled = atomicNumber <= 1;
+                if(atomicNumber > massNumber)
+                    setA(atomicNumber);
+            }
+            
+            function aDown(){
+                if(massNumber > atomicNumber)
+                    setA(massNumber - 1);
+            }
+            
+            function aUp(){
+                setA(massNumber + 1);
+            }
+            
+            function setA(a){
+                massNumber = a*1;
+                aInputEl.value = massNumber;
+                chartEl.src = "Z"+atomicNumber+"A"+massNumber+".svg";
+                aLeftEl.disabled = massNumber <= atomicNumber;
             }
         </script>
     </body>

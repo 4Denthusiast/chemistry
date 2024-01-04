@@ -9,9 +9,10 @@ main = do
     case filter ((/= '-') . head) args of
         "graph":args1 -> case args1 of
             [] -> putStrLn "Argument required: atomic number"
-            [z]    -> processAtom (read z) 0
-            [z, c] -> processAtom (read z) (parseSignedNumber c)
-            _      -> putStrLn "too many arguments"
+            [z]       -> processAtom (read z) (2 * read z) 0
+            [z, a]    -> processAtom (read z) (read a) 0
+            [z, a, c] -> processAtom (read z) (read a) (parseSignedNumber c)
+            _         -> putStrLn "too many arguments"
         "ea":args1 -> case args1 of
             []     -> printEaTable Nothing
             [z]    -> printEaTable $ Just $ read z

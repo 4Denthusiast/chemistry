@@ -14,20 +14,14 @@ import Graphics.Rendering.Chart.Backend.Diagrams(toFile)
 import Graphics.Rendering.Chart.Axis.Floating
 
 graphAtom :: Atom -> IO ()
-graphAtom atom = toFile def ("charts/" ++ show (atomicNumber atom) ++ ".svg") $ do
-    layout_title .= "Element #" ++ show (atomicNumber atom) ++", charge: "++ show (charge atom) ++",  "++prettyElectronArrangement atom
+graphAtom atom = toFile def ("charts/Z" ++ show (atomicNumber atom) ++ "A" ++ show (massNumber atom) ++ ".svg") $ do
+    layout_title .= "Element #" ++ show (atomicNumber atom) ++"("++ show (massNumber atom) ++") charge: "++ show (charge atom) ++",  "++prettyElectronArrangement atom
     layout_x_axis . laxis_generate .= autoScaledLogAxis (LogAxisParams (map show))
     mapM_
         (\(l, ψs) -> plot (line [l] $ map (denormalize . zip (atomGrid atom) . take 1500) ψs))
         (zip angularMomentumLabels $ poToList $ trimPO $ (\occ orb -> if occ>0 then orb else []) <$> (occupations atom) <*> (orbitals atom))
         --(zip angularMomentumLabels $ takeWhile (not . null) (orbitals atom))
         --(zip angularMomentumLabels $ takeWhile (not . null) $ take 1 $ (orbitals atom))
-
-rs = logGrid 0.005 1
-rst = (takeWhile (<10000) rs)
-vs = basePotential rs 0 1
-ψs = trimmedOrbital rs vs 0
-ψs' = map (std . fst) ψs
 
 denormalize :: [(Double, Double)] -> [(Double, Double)]
 denormalize or@((r0,ψ0):(r1,ψ1):_) = map (\(r, ψ) -> (r, ψ*s*r^1)) or

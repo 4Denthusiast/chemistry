@@ -91,6 +91,7 @@ indices = PerOrbital Nothing [[Just (n, l) | n <- [1..]] | l <- [0..]]
 data Atom = Atom
     {
         atomicNumber :: Int,
+        massNumber :: Int,
         charge :: Int,
         atomGrid :: Grid,
         forcedOccs :: PerOrbital Int,
@@ -114,30 +115,31 @@ electronsRequired atom = atomicNumber atom - charge atom
 incorrectCharge :: Atom -> Double
 incorrectCharge atom = fromIntegral (electronsRequired atom) - sum (occupations atom)
 
-emptyAtom :: Int -> Int -> Atom
-emptyAtom z c = Atom z c (logGrid 0.01 (fromIntegral z)) (emptyPO 0) (emptyPO 0) (emptyPO 0) (emptyPO 1) (emptyPO []) (emptyPO 0)
+emptyAtom :: Int -> Int -> Int -> Atom
+emptyAtom z a c = Atom z a c (logGrid 0.01 (fromIntegral z)) (emptyPO 0) (emptyPO 0) (emptyPO 0) (emptyPO 1) (emptyPO []) (emptyPO 0)
 
 -- If the atomic numbers are similar, this should converge faster than starting from empty.
-copyAtom :: Atom -> Int -> Int -> Atom
-copyAtom atom z c = atom {
+copyAtom :: Atom -> Int -> Int -> Int -> Atom
+copyAtom atom z a c = atom {
         atomicNumber = z,
+        massNumber = a,
         charge = c,
         atomGrid = logGrid 0.01 (fromIntegral z)
     }
 
-copyAtom' :: Atom -> Int -> Int -> Atom
-copyAtom' atom z' c' = copyAtom atom (z' + atomicNumber atom) (c' + charge atom)
+copyAtom' :: Atom -> Int -> Int -> Int -> Atom
+copyAtom' atom z' a' c' = copyAtom atom (z' + atomicNumber atom) (a' + massNumber atom) (c' + charge atom)
 
 incrementAtom :: Atom -> Atom
-incrementAtom atom = relaxAtom $ copyAtom' atom 1 0
+incrementAtom atom = relaxAtom $ copyAtom' atom 1 2 0
 
 cationise :: Atom -> Atom
-cationise atom = relaxAtom' $ copyAtom' atom 0 1 where relaxAtom' a = if incorrectCharge a < 0 then relaxAtom a else a
+cationise atom = relaxAtom' $ copyAtom' atom 0 0 1 where relaxAtom' a = if incorrectCharge a < 0 then relaxAtom a else a
 anionise  :: Atom -> Atom
-anionise  atom = relaxAtom $ copyAtom' atom 0 (-1)
+anionise  atom = relaxAtom $ copyAtom' atom 0 0 (-1)
 
 aperiodicTable :: [Atom]
-aperiodicTable = iterate incrementAtom (makeAtom 1 0)
+aperiodicTable = iterate incrementAtom (makeAtom 1 2 0)
 
 orbitalRadii :: Atom -> PerOrbital Double
 orbitalRadii a = sum <$> zipWith3 (\r r' ψ -> (r'-r) * r^4 * ψ^2) (atomGrid a) (tail $ atomGrid a) <$> orbitals a
@@ -227,7 +229,8 @@ getPotential atomC n0 l0 s0 = first (zipWith (+) $ fst baseV) (getShieldingPoten
     where atom  = atomInCache atomC
           rs    = atomGrid atom
           z     = atomicNumber atom
-          baseV = basePotential rs (fromIntegral l0) (fromIntegral z)
+          a     = massNumber atom
+          baseV = basePotential rs (fromIntegral l0) (fromIntegral z) (fromIntegral a)
 
 
 
@@ -285,7 +288,7 @@ mixAtoms ac0 ac1 = let
 
 startAtom :: AtomCache -- an atom such that (mixAtoms startAtom ~= id)
 startAtom = AtomCache
-    (Atom undefined undefined undefined undefined (emptyPO 0) (emptyPO (1e20)) undefined (emptyPO []) (emptyPO 0))
+    (Atom undefined undefined undefined undefined undefined (emptyPO 0) (emptyPO (1e20)) undefined (emptyPO []) (emptyPO 0))
     [] (emptyPO [])
 
 traceAtom :: Atom -> a -> a
@@ -387,11 +390,11 @@ relaxAtom atom = fromMaybe (error "Atom previously thought best has failed to co
                     triedEAs' = S.union triedEAs $ S.fromList $ map forcedEA $ bestAt : failedAtoms
                     forcedIncorrectCharge a = electronsRequired a - sum (forcedOccs a)
 
-makeAtom :: Int -> Int -> Atom
-makeAtom z c = relaxAtom $ emptyAtom z c
+makeAtom :: Int -> Int -> Int -> Atom
+makeAtom z a c = relaxAtom $ emptyAtom z a c
 
-makeAtomWithEA :: Int -> Int -> [(N,L,Int)] -> Atom
-makeAtomWithEA z c ea = relaxAtom $ forceEA (emptyAtom z c) ea
+makeAtomWithEA :: Int -> Int -> Int -> [(N,L,Int)] -> Atom
+makeAtomWithEA z a c ea = relaxAtom $ forceEA (emptyAtom z a c) ea
 
-makeAtomTrustingEA :: Int -> Int -> [(N,L,Int)] -> Atom
-makeAtomTrustingEA z c ea = fromMaybe (error "Atom with cached E.A. failed to converge.") $ convergeToThreshold 0.0001 $ startAtomConvergent $ forceEA (emptyAtom z c) ea
+makeAtomTrustingEA :: Int -> Int -> Int -> [(N,L,Int)] -> Atom
+makeAtomTrustingEA z a c ea = fromMaybe (error "Atom with cached E.A. failed to converge.") $ convergeToThreshold 0.0001 $ startAtomConvergent $ forceEA (emptyAtom z a c) ea

@@ -26,14 +26,15 @@ splitSpin (n, l, o)
         where ll = (l+1)^2
 
 nuclearEnergy :: Atom -> (N, L, Spin, Int) -> Energy
-nuclearEnergy atom (n, l, _, o) = fromIntegral o * sum (zipWith4 (\r r' hψ ψ -> r*r*r*(r'-r)*hψ*ψ) rs (tail rs) (oneElectronHamiltonian rs z l ψs) ψs)
+nuclearEnergy atom (n, l, _, o) = fromIntegral o * sum (zipWith4 (\r r' hψ ψ -> r*r*r*(r'-r)*hψ*ψ) rs (tail rs) (oneElectronHamiltonian rs z a l ψs) ψs)
     where rs = atomGrid atom
           z  = atomicNumber atom
+          a  = massNumber atom
           ψs = getPO (orbitals atom) n l
 
-oneElectronHamiltonian :: Grid -> Int -> L -> Orbital -> Orbital
-oneElectronHamiltonian rs z l ψs = zipWith (+) potentialTerm laplacianTerm
-    where vs            = fst $ basePotential rs (fromIntegral l) (fromIntegral z)
+oneElectronHamiltonian :: Grid -> Int -> Int -> L -> Orbital -> Orbital
+oneElectronHamiltonian rs z a l ψs = zipWith (+) potentialTerm laplacianTerm
+    where vs            = fst $ basePotential rs (fromIntegral l) (fromIntegral z) (fromIntegral a)
           potentialTerm = zipWith (*) vs ψs
           rds           = zipWith (-) (tail rs) rs
           dup (x:xs)    = x:x:xs

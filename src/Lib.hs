@@ -8,9 +8,9 @@ import AtomEnergy
 import Graphing
 import Cache
 
-processAtom :: Int -> Int -> IO ()
-processAtom z c = do
-    atom <- makeAtomUsingCache z c
+processAtom :: Int -> Int -> Int -> IO ()
+processAtom z a c = do
+    atom <- makeAtomUsingCache z a c
     let energy = totalEnergy atom
     putStrLn $ prettyElectronArrangement atom
     putStrLn $ show $ energy
@@ -26,14 +26,14 @@ anionsOf atom = do
     cm <- getCacheMode
     case cm of
         NoCache -> return $ takeWhile ((==0) . incorrectCharge) $ tail $ iterate anionise atom
-        _ -> takeWhileM ((==0) . incorrectCharge) $ map (makeAtomUsingCache (atomicNumber atom) . (charge atom -)) [1..]
+        _ -> takeWhileM ((==0) . incorrectCharge) $ map (makeAtomUsingCache (atomicNumber atom) (massNumber atom) . (charge atom -)) [1..]
 
 cationsOf :: Atom -> IO [Atom]
 cationsOf atom = do
         cm <- getCacheMode
         case cm of
             NoCache -> return $ takeWhile valid $ tail $ iterate cationise atom
-            _ -> takeWhileM valid $ map (makeAtomUsingCache (atomicNumber atom)) [charge atom+1..atomicNumber atom]
+            _ -> takeWhileM valid $ map (makeAtomUsingCache (atomicNumber atom) (massNumber atom)) [charge atom+1..atomicNumber atom]
     where valid ion = charge ion < atomicNumber ion && totalEnergy ion < totalEnergy atom + 0.07
 
 takeWhileM :: Monad m => (a -> Bool) -> [m a] -> m [a]
@@ -57,4 +57,4 @@ printEaTable n = mapM_ processElement =<< (maybe id take n <$> atoms)
               cm <- getCacheMode
               return $ case cm of
                   NoCache -> map return aperiodicTable
-                  _       -> map (flip makeAtomUsingCache 0) [1..]
+                  _       -> map (\z -> makeAtomUsingCache z (z*2) 0) [1..]

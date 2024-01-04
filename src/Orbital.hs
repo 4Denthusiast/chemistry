@@ -42,13 +42,13 @@ logGrid :: Double -> Double -> Grid
 logGrid spacing z = iterate (* (1 + spacing)) (max 0.3 $ log (slimConstant/coulumb'sConstant) - 3/(sqrt z +1))
 
 -- The effective potential purely from nuclear charge and angular momentum
-basePotential :: Grid -> Double -> Double -> Potential
-basePotential grid l charge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce r) grid, repeat 0)
-    where coulumbForce r = charge * (-coulumb'sConstant + slimConstant / exp r) / (r*r)
+basePotential :: Grid -> Double -> Double -> Double -> Potential
+basePotential grid l charge sCharge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce r) grid, repeat 0)
+    where coulumbForce r = (-charge * coulumb'sConstant + sCharge * slimConstant / exp r) / (r*r)
 
 coulumb'sConstant, slimConstant :: Double
 coulumb'sConstant = 0.9
-slimConstant = coulumb'sConstant * 1.8
+slimConstant = coulumb'sConstant
 
 -- Calculates the orbital with the fixed energy value.
 singleOrbital :: Grid -> Potential -> Energy -> DOrbital

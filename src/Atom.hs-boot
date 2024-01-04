@@ -19,6 +19,7 @@ indices :: PerOrbital (Maybe (N,L))
 data Atom = Atom
     {
         atomicNumber :: Int,
+        massNumber :: Int,
         charge :: Int,
         atomGrid :: Grid,
         forcedOccs :: PerOrbital Int,
