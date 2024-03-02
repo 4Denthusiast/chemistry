@@ -24,8 +24,8 @@ graphAtom atom = toFile def ("charts/Z" ++ show (atomicNumber atom) ++ "A" ++ sh
         --(zip angularMomentumLabels $ takeWhile (not . null) $ take 1 $ (orbitals atom))
 
 denormalize :: [(Double, Double)] -> [(Double, Double)]
-denormalize or@((r0,ψ0):(r1,ψ1):_) = map (\(r, ψ) -> (r, ψ*s*r^1)) or
-    where s = (r1-r0)/(ψ1-ψ0)
+denormalize or = map (\(r, ψ) -> (r, ψ*s*r^1)) or
+    where s = recip $ snd $ head $ dropWhile ((<1) . fst) or
 
 graphValues :: Double -> Grid -> [[Double]] -> IO ()
 graphValues lim rs xs = toFile def "chart.svg" $ do

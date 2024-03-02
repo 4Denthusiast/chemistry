@@ -91,7 +91,7 @@ asymOverlap ac0 n0 l0 ac1 n1 l1 m1 m2 = (a, integrate ov, integrate (zipWith (*)
     where [atm0, atm1] = map atomInCache [ac0,ac1]
           (a, ov)   = asymptoticOverlap atm0 n0 l0 atm1 n1 l1 m1 m2
           rs        = atomGrid atm1
-          vs        = map (min 0) $ fst $ getPotential ac1 n1 l1 Nothing -- Exclude the negative part as (to a crude approximation), the other orbital will be repelled and won't penetrate. It will have additional kinetic energy from this, but that's ignored. The exchange energy is negligible as separation->infinity.
+          vs        = map (min 0) $ fst4 $ getPotential ac1 n1 l1 Nothing -- Exclude the negative part as (to a crude approximation), the other orbital will be repelled and won't penetrate. It will have additional kinetic energy from this, but that's ignored. The exchange energy is negligible as separation->infinity.
           integrate = trimSum 0 0 0 . zipWith3 (\r r' x -> r^3*x*(r'-r)) rs (tail rs)
           trimSum s m a [] = s
           trimSum s m a (x:xs) = let a' = a + 0.03*(abs x - a)

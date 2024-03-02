@@ -34,11 +34,11 @@ nuclearEnergy atom (n, l, _, o) = fromIntegral o * sum (zipWith4 (\r r' hψ ψ -
 
 oneElectronHamiltonian :: Grid -> Int -> Int -> L -> Orbital -> Orbital
 oneElectronHamiltonian rs z a l ψs = zipWith (+) potentialTerm laplacianTerm
-    where vs            = fst $ basePotential rs (fromIntegral l) (fromIntegral z) (fromIntegral a)
+    where vs            = fst4 $ basePotential rs (fromIntegral l) (fromIntegral z) (fromIntegral a)
           potentialTerm = zipWith (*) vs ψs
           rds           = zipWith (-) (tail rs) rs
           dup (x:xs)    = x:x:xs
-          dψs           = dup $ zipWith (/) (zipWith (-) (tail  ψs)  ψs) rds -- The first term would be 1, but these are normalised.
+          dψs           = dup $ zipWith (/) (zipWith (-) (tail  ψs)  ψs) rds
           ddψs          =       zipWith (/) (zipWith (-) (tail dψs) dψs) rds
           laplacianTerm = zipWith3 (\ddψ dψ r -> (-ddψ - 3/r * dψ)/2) ddψs dψs rs
 

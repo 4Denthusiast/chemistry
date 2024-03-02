@@ -28,7 +28,7 @@ import System.IO.Unsafe
 traceShow1 :: Show a => a -> b -> b
 traceShow1 = const id
 
-type Potential = ([Double], [Double]) -- The first list is the actual potential. The second if for the exchange energy, which can't be described simply as a potential.
+type Potential = ([Double], [Double], Double, Double) -- The first list is the actual potential. The second if for the exchange energy, which can't be described simply as a potential. The last two elements are the values A and B such that V = (A+rB+O(r^2))r^-2 near the origin.
 type Grid = [Double] -- radius sampling points
 type DOrbital = [(DDouble, DDouble)]
 type Orbital = [Double]
@@ -43,17 +43,51 @@ logGrid spacing z = iterate (* (1 + spacing)) (max 0.3 $ log (slimConstant/coulu
 
 -- The effective potential purely from nuclear charge and angular momentum
 basePotential :: Grid -> Double -> Double -> Double -> Potential
-basePotential grid l charge sCharge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce r) grid, repeat 0)
+basePotential grid l charge sCharge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce r) grid, repeat 0, sCharge*slimConstant - charge*coulumb'sConstant + l*(l+2)/2, -sCharge*slimConstant)
     where coulumbForce r = (-charge * coulumb'sConstant + sCharge * slimConstant / exp r) / (r*r)
 
 coulumb'sConstant, slimConstant :: Double
 coulumb'sConstant = 0.9
 slimConstant = coulumb'sConstant
 
+{-Assume that, in the vicinity of 0, Ψ can be approximated as
+Ψ = r^f(1 + g r + O(r^2))
+and V can be approximated as
+V = (A+rB)r^-2
+(i.e. A = (s charge-charge)*k+l(l+2)/2, and B = -s charge*k)
+then
+
+Ψ' = fr^(f-1)(1+gr+...) + r^f(g+...) = r^(f-1)(f+(f+1)gr+...)
+Ψ'' = (f-1)r^(f-2)(f+(f+1)gr...) + r^(f-1)((f+1)g+...) = r^(f-2)(f(f-1)+f(f+1)gr+...)
+
+∇^2 Ψ/2 = VΨ (the energy term is negligible here)
+1/2 (Ψ'' + 3/r Ψ') = (A+rB)r^-2 Ψ
+1/2 (f(f-1) + f(f+1)gr + 3(f + (f+1)gr)) = (A+rB)(1+gr)
+ff + 2f + r(f+3)(f+1)g = 2A + r(2B+2Ag) + O(r^2)
+
+ff+2f-2A = 0, f = (-2 +- sqrt(4+8A))/2 = -1+-sqrt(1+2A)
+The positive root is the correct one: f = sqrt(1 + 2A) - 1
+(ff+4f+3)g-2Ag = 2B
+g(2f+3) = 2B
+g = 2B/(2f+3)
+
+therefore near the origin, Ψ'/Ψ = f/r + f+g + O(r)
+
+Alternatively, if we use Ψ = r^f e^(hr+O(r^2))
+Ψ' = (f+hr)r^(f-1)e^hr
+Ψ'' = h r^(f-1)e^hr + (f+hr)(f-1+hr)r^(f-2)e^hr
+  = (ff-f+2fhr+3(f+hr)+O(rr))r^(f-2)e^hr
+1/2 (ff+2f+2fhr+3hr) = A+Br
+2fh+3h=2B
+h=2B/(2f+3)
+-}
+
 -- Calculates the orbital with the fixed energy value.
 singleOrbital :: Grid -> Potential -> Energy -> DOrbital
-singleOrbital rs (vs,xs) e = scanl progress (0, 1) (zip4 rs (zipWith (-) (tail rs) rs) vs xs)
-    where progress (ψ, dψ) (r, dr, v, x) = (ψ', dψ')
+singleOrbital rs (vs,xs,a,b) e = scanl progress (1, dual $ f/head rs + g) (zip4 rs (zipWith (-) (tail rs) rs) vs xs)
+    where f = sqrt (1 + 2*a) - 1
+          g = 2*b/(2*f+3)
+          progress (ψ, dψ) (r, dr, v, x) = (ψ', dψ')
               where ddψ = ((dual v) - (Dual e 1))*ψ*2 - (dual x)*2 - 3/(dual r) * dψ
                     dψ' = (dual dr) * ddψ  + dψ
                     ψ'  = (dual dr) *  dψ' +  ψ
@@ -62,9 +96,9 @@ trimmedOrbital :: Grid -> Potential -> Energy -> DOrbital
 trimmedOrbital rs vs e = trimOrbital rs vs $ singleOrbital rs vs e
 
 trimOrbital :: Grid -> Potential -> DOrbital -> DOrbital
-trimOrbital rs (vs,_) = map snd . trim3 . trim2 . trim1 . zip rs
+trimOrbital rs (vs,_,_,_) = map snd . trim3 . trim2 . trim1 . zip rs
     where trim1 rψs = takeWhile (\(r, (ψ, _)) -> abs (std ψ) * r < 3*threshold rψs) rψs
-          thresholdPoint = (2*) $ þrd3 $ labHead "trimOrbital" $ filter (\(v, v', r) -> v < v' || r > 8) $ zip3 vs (tail vs) rs
+          thresholdPoint = (2*) $ þrd3 $ labHead "trimOrbital" $ filter (\(v, v', r) -> r > 1 && v < v' || r > 8) $ zip3 vs (tail vs) rs
           threshold = maximum . map (\(r, (ψ, _)) -> abs (std ψ) * r) . takeWhile ((< thresholdPoint) . fst)
           trim2 = takeWhile (\(r, (ψ, dψ)) -> r < 2 || r^2 * (3*(std ψ)^2 + (std ψ + std dψ * r)^2) > 1e-4)
           trim3 = dropWhileEndExcept (\(r, (ψ, dψ)) -> ψ * dψ > 0 && r > 3) 150
@@ -89,7 +123,7 @@ findEnergyHinted e0 rs vs n = traceShow1 (e0, n) $ seq (stashPotential vs) $ let
         iter :: Energy -> Energy -> Energy -> Energy
         iter e ll hh = traceShow1 [e,ll,hh] $ let
                 orbital      = trimmedOrbital rs vs e
-                ((ψ, dψ), r, v) = last $ zip3 orbital rs (fst vs)
+                ((ψ, dψ), r, v) = last $ zip3 orbital rs (fst4 vs)
                 roundError   = doubleUlp e * (inf ψ)
                 roundWarning = if roundError * r > 0.01 then trace "Rounding error." else id
                 llhhError    = if ll > hh then error "Energy interval of negative size: ll > hh" else ()
@@ -122,7 +156,7 @@ markOrd :: String -> Ordering -> Ordering
 markOrd s o  = case o of {LT -> traceShow1 (s++"<") LT; GT -> traceShow1 (s++">") GT; EQ -> EQ}
 
 potentialBox :: IORef Potential
-potentialBox = unsafePerformIO $ newIORef ([],[])
+potentialBox = unsafePerformIO $ newIORef ([],[],0,0)
 
 stashPotential :: Potential -> ()
 stashPotential = unsafePerformIO . writeIORef potentialBox

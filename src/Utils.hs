@@ -2,6 +2,7 @@ module Utils(
     fst3,
     snd3,
     þrd3,
+    fst4,
     frþ4,
     mergeBy,
     uncurry3,
@@ -22,6 +23,9 @@ snd3 (_, x, _) = x
 
 þrd3 :: (a, b, c) -> c
 þrd3 (_, _, x) = x
+
+fst4 :: (a, b, c, d) -> a
+fst4 (x, _, _, _) = x
 
 frþ4 :: (a, b, c, d) -> d
 frþ4 (_, _, _, x) = x

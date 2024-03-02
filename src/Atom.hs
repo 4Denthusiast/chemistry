@@ -197,7 +197,7 @@ genAtomCache atom = AtomCache
     where vs = genShieldingPotential (atomGrid atom) <$> orbitals atom
 
 getShieldingPotential :: AtomCache -> N -> L -> Maybe Spin -> Potential
-getShieldingPotential atomCache n0 l0 s0 = (vs, xs)
+getShieldingPotential atomCache n0 l0 s0 = (vs, xs, 0, 0)
     where atom      = atomInCache atomCache
           arr       = doubleElectronArrangement atom
           occ0      = getPO (occupations atom) n0 l0
@@ -219,18 +219,19 @@ getShieldingPotential atomCache n0 l0 s0 = (vs, xs)
               in zipWith3 (\ψ inn out -> o'*ψ*(inn+out)/fromIntegral ((l+1)*(l0+1))) ψs inner outer ++ repeat 0
           xchOcc n l o
               | occ0 == 0          = min o (fromIntegral (l+1)^2)
-              | n == n0 && l == l0 = 2*upOcc0^2 / occ0 + occ0 - 2*upOcc0 - 1
+              | n == n0 && l == l0 = max 0 $ 2*upOcc0^2 / occ0 + occ0 - 2*upOcc0 - 1
               | otherwise          = ((occ0 - upOcc0)*o + (2*upOcc0 - occ0) * min o (fromIntegral (l+1)^2))/occ0
-          vs        = (if zeroEnergy then id else zipWith (flip (-)) (getPO (shieldingPotentials atomCache) n0 l0)) $ totalPotential atomCache
+          vs        = (if zeroEnergy then id else zipWith (\s v -> v - min 1 occ0 * s) (getPO (shieldingPotentials atomCache) n0 l0)) $ totalPotential atomCache
           xs        = foldr (zipWith (+)) (repeat 0) $ if zeroEnergy then [] else map (uncurry3 xch) arr
 
 getPotential :: AtomCache -> N -> L -> Maybe Spin -> Potential
-getPotential atomC n0 l0 s0 = first (zipWith (+) $ fst baseV) (getShieldingPotential atomC n0 l0 s0)
+getPotential atomC n0 l0 s0 = (zipWith (+) baseV shieldV, shieldX, poleA, poleB)
     where atom  = atomInCache atomC
           rs    = atomGrid atom
           z     = atomicNumber atom
           a     = massNumber atom
-          baseV = basePotential rs (fromIntegral l0) (fromIntegral z) (fromIntegral a)
+          (baseV,_,poleA,poleB) = basePotential rs (fromIntegral l0) (fromIntegral z) (fromIntegral a)
+          (shieldV,shieldX,_,_) = getShieldingPotential atomC n0 l0 s0
 
 
 
