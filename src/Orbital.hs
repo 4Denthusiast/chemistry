@@ -39,7 +39,9 @@ data Spin = Up | Down deriving (Eq, Ord, Enum)
 instance Show Spin where{show Up = "↑"; show Down = "↓"}
 
 logGrid :: Double -> Double -> Grid
-logGrid spacing z = iterate (* (1 + spacing)) (max 0.3 $ log (slimConstant/coulumb'sConstant) - 3/(sqrt z +1))
+logGrid spacing z = iterate (* (1 + spacing)) ((4*c*spacing^3)**(1/c))
+    where c = 2*sqrt(1+2*z*coulumb'sConstant)+2
+-- Ideally, r0 ~= (spacing^3*2(2f+4)A/B)^(1/(2f+4)) (in the notation of the comment below), for an optimal combination of step size and start point. This is further approximated with A=B/2=kZ.
 
 -- The effective potential purely from nuclear charge and angular momentum
 basePotential :: Grid -> Double -> Double -> Double -> Potential
@@ -80,16 +82,30 @@ Alternatively, if we use Ψ = r^f e^(hr+O(r^2))
 1/2 (ff+2f+2fhr+3hr) = A+Br
 2fh+3h=2B
 h=2B/(2f+3)
+
+For Ψ = r^f e^hr exactly, the potential implied (for 0 energy) is
+∇^2 Ψ/2 = VΨ
+1/2 (ff+2f+2fhr+3hr+hhrr)r^(f-2)e^hr = V r^f e^hr
+V = (A+Br+hhrr/2)r^-2
+= (A+Br)r^-2 + 2BB/(2f+3)^2
+= (A+Br)r^-2 + 2BB/(4ff+12f+9)
+= (A+Br)r^-2 + 2BB/(8A+4sqrt(1+2A)+5)
+whereas the true V-E is
+(A+Br)r^-2 - B + screening - E + O(r)
+The implied error in energy is therefore
+2BB/(8A+4sqrt(1+2A)+5) + B - screening + E + O(r)
+The B term is dominant (or at least similar) except in the case of high atomic number (> about 3) with very few neutrons, which this program deals with poorly for other reasons anyway.
 -}
 
 -- Calculates the orbital with the fixed energy value.
 singleOrbital :: Grid -> Potential -> Energy -> DOrbital
-singleOrbital rs (vs,xs,a,b) e = scanl progress (1, dual $ f/head rs + g) (zip4 rs (zipWith (-) (tail rs) rs) vs xs)
+singleOrbital rs (vs,xs,a,b) e = scanl progress (1, dual $ f/head rs + g) (zip5 rs drs (head drs:drs) vs xs)
     where f = sqrt (1 + 2*a) - 1
           g = 2*b/(2*f+3)
-          progress (ψ, dψ) (r, dr, v, x) = (ψ', dψ')
-              where ddψ = ((dual v) - (Dual e 1))*ψ*2 - (dual x)*2 - 3/(dual r) * dψ
-                    dψ' = (dual dr) * ddψ  + dψ
+          drs = zipWith (-) (tail rs) rs
+          progress (ψ, dψ) (r, dr, prevDr, v, x) = (ψ', dψ')
+              where ddψ = (((dual v) - (Dual e 1))*ψ*2 - (dual x)*2 - 3/(dual r) * dψ)/(1 + 3/2*dual(dr/r)) --The division at the end implies the estimate of the derivative at r is about (dψ+dψ')/2.
+                    dψ' = (dual (dr+prevDr)/2) * ddψ  + dψ
                     ψ'  = (dual dr) *  dψ' +  ψ
 
 trimmedOrbital :: Grid -> Potential -> Energy -> DOrbital
