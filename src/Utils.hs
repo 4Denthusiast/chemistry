@@ -10,9 +10,11 @@ module Utils(
     map3,
     zipWithLong,
     cmdHasOption,
-    labHead
+    labHead,
+    besselK1
 ) where
 
+import Debug.Trace
 import System.Environment
 
 fst3 :: (a, b, c) -> a
@@ -59,3 +61,10 @@ cmdHasOption c = (elem c . concat . map tail . filter ((=='-') . head)) <$> getA
 labHead :: String -> [a] -> a
 labHead s [] = error ("labHead: empty list at " ++ s)
 labHead _ (x:_) = x
+
+-- Following https://arxiv.org/abs/1209.1547
+besselK1 :: Double -> Double
+besselK1 0 = 1/0
+besselK1 z = tryH 1 (withH 2)
+    where tryH h prev = let new = withH h in if abs (new - prev) <= 1e-11 * prev then new else tryH (h/2) new
+          withH h = (*h) $ sum $ (exp (-z) / 2 :) $ takeWhile (> exp (-z) * 1e-20) $ map (\n -> cosh (n*h) * exp (-z * cosh (n*h))) [1..]

@@ -28,7 +28,7 @@ import System.IO.Unsafe
 traceShow1 :: Show a => a -> b -> b
 traceShow1 = const id
 
-type Potential = ([Double], [Double], Double, Double) -- The first list is the actual potential. The second if for the exchange energy, which can't be described simply as a potential. The last two elements are the values A and B such that V = (A+rB+O(r^2))r^-2 near the origin.
+type Potential = ([Double], [Double], Double, Double) -- The first list is the actual potential. The second is for the exchange energy, which can't be described simply as a potential. The last two elements are the values A and B such that V = A/rr + B log r + O(1) near the origin.
 type Grid = [Double] -- radius sampling points
 type DOrbital = [(DDouble, DDouble)]
 type Orbital = [Double]
@@ -39,69 +39,40 @@ data Spin = Up | Down deriving (Eq, Ord, Enum)
 instance Show Spin where{show Up = "↑"; show Down = "↓"}
 
 logGrid :: Double -> Double -> Grid
-logGrid spacing z = iterate (* (1 + spacing)) ((4*c*spacing^3)**(1/c))
-    where c = 2*sqrt(1+2*z*coulumb'sConstant)+2
--- Ideally, r0 ~= (spacing^3*2(2f+4)A/B)^(1/(2f+4)) (in the notation of the comment below), for an optimal combination of step size and start point. This is further approximated with A=B/2=kZ.
+logGrid spacing z = iterate (* (1 + spacing)) ((a*c*spacing^3)**c)
+    where a = z*coulumb'sConstant
+          c = 1/(2*sqrt(1+2*a)+1)
+-- The energy error due to the r<r0 approximate analytic solution is about B r0^(2f+3), in the notation of the comment below. The discretization error is about A^2 spacing^3 / 12. These are optimally balanced when (2f+3)B r0^(2f+3) ~= A^2 spacing^3. This is further approximated with A=B=kZ.
+-- TODO: This indicates that the discretization error increases quite rapidly with Z. Consider using a smaller spacing for high Z.
 
 -- The effective potential purely from nuclear charge and angular momentum
 basePotential :: Grid -> Double -> Double -> Double -> Potential
-basePotential grid l charge sCharge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce r) grid, repeat 0, sCharge*slimConstant - charge*coulumb'sConstant + l*(l+2)/2, -sCharge*slimConstant)
-    where coulumbForce r = (-charge * coulumb'sConstant + sCharge * slimConstant / exp r) / (r*r)
+basePotential grid l charge sCharge = (map (\r -> l*(l+2) * r^^(-2) * 0.5 + coulumbForce r) grid, repeat 0, sCharge*slimConstant - charge*coulumb'sConstant + l*(l+2)/2, sCharge*slimConstant/2)
+    where coulumbForce r = -charge * coulumb'sConstant / (r*r) + sCharge * slimConstant * besselK1 r / r
 
 coulumb'sConstant, slimConstant :: Double
 coulumb'sConstant = 0.9
 slimConstant = coulumb'sConstant
 
-{-Assume that, in the vicinity of 0, Ψ can be approximated as
-Ψ = r^f(1 + g r + O(r^2))
-and V can be approximated as
-V = (A+rB)r^-2
-(i.e. A = (s charge-charge)*k+l(l+2)/2, and B = -s charge*k)
-then
-
-Ψ' = fr^(f-1)(1+gr+...) + r^f(g+...) = r^(f-1)(f+(f+1)gr+...)
-Ψ'' = (f-1)r^(f-2)(f+(f+1)gr...) + r^(f-1)((f+1)g+...) = r^(f-2)(f(f-1)+f(f+1)gr+...)
-
-∇^2 Ψ/2 = VΨ (the energy term is negligible here)
-1/2 (Ψ'' + 3/r Ψ') = (A+rB)r^-2 Ψ
-1/2 (f(f-1) + f(f+1)gr + 3(f + (f+1)gr)) = (A+rB)(1+gr)
-ff + 2f + r(f+3)(f+1)g = 2A + r(2B+2Ag) + O(r^2)
-
-ff+2f-2A = 0, f = (-2 +- sqrt(4+8A))/2 = -1+-sqrt(1+2A)
-The positive root is the correct one: f = sqrt(1 + 2A) - 1
-(ff+4f+3)g-2Ag = 2B
-g(2f+3) = 2B
-g = 2B/(2f+3)
-
-therefore near the origin, Ψ'/Ψ = f/r + f+g + O(r)
-
-Alternatively, if we use Ψ = r^f e^(hr+O(r^2))
-Ψ' = (f+hr)r^(f-1)e^hr
-Ψ'' = h r^(f-1)e^hr + (f+hr)(f-1+hr)r^(f-2)e^hr
-  = (ff-f+2fhr+3(f+hr)+O(rr))r^(f-2)e^hr
-1/2 (ff+2f+2fhr+3hr) = A+Br
-2fh+3h=2B
-h=2B/(2f+3)
-
-For Ψ = r^f e^hr exactly, the potential implied (for 0 energy) is
-∇^2 Ψ/2 = VΨ
-1/2 (ff+2f+2fhr+3hr+hhrr)r^(f-2)e^hr = V r^f e^hr
-V = (A+Br+hhrr/2)r^-2
-= (A+Br)r^-2 + 2BB/(2f+3)^2
-= (A+Br)r^-2 + 2BB/(4ff+12f+9)
-= (A+Br)r^-2 + 2BB/(8A+4sqrt(1+2A)+5)
-whereas the true V-E is
-(A+Br)r^-2 - B + screening - E + O(r)
-The implied error in energy is therefore
-2BB/(8A+4sqrt(1+2A)+5) + B - screening + E + O(r)
-The B term is dominant (or at least similar) except in the case of high atomic number (> about 3) with very few neutrons, which this program deals with poorly for other reasons anyway.
+{-
+Let V = A/rr + B log r + C + O(r log r) for small r,
+Let f = sqrt(1 + 2A) - 1 (so that A = ff/2 + f), and h = B/(2f+4)
+Let Ψ = r^(f + hrr) = r^f e^(hrr log r)
+Ψ' = (f/r + h (2r log r + r)) Ψ
+Ψ'' = (-f/rr + h (2log r + 3) + ff/rr + 2fh(2log r + 1) + hhrr(4(log r)^2 + 4log r + 1)) Ψ
+∇^2 Ψ/2 = 1/2 (Ψ'' + 3/r Ψ') = VΨ - E
+energy error = 1/2 (3h(2log r + 1) + h(2log r + 3) + 2fh(2log r + 1)) - B log r - C + E + O(r log r)
+= h/2 (8+4f) log r - B log r + h (3 + f) - C + E + O(r log r)
+~= B/2 - C + E
+The B and C terms are similar in magnitude, adding up to about 0.9 k_s * mass number. This neglects screening, but that should also be much smaller.
 -}
 
 -- Calculates the orbital with the fixed energy value.
 singleOrbital :: Grid -> Potential -> Energy -> DOrbital
-singleOrbital rs (vs,xs,a,b) e = scanl progress (1, dual $ f/head rs + g) (zip5 rs drs (head drs:drs) vs xs)
+singleOrbital rs (vs,xs,a,b) e = scanl progress (1, dual $ f/r0 + h*(2*r0*log r0 + r0)) (zip5 rs drs (head drs:drs) vs xs)
     where f = sqrt (1 + 2*a) - 1
-          g = 2*b/(2*f+3)
+          h = b/(2*f+4)
+          r0 = head rs
           drs = zipWith (-) (tail rs) rs
           progress (ψ, dψ) (r, dr, prevDr, v, x) = (ψ', dψ')
               where ddψ = (((dual v) - (Dual e 1))*ψ*2 - (dual x)*2 - 3/(dual r) * dψ)/(1 + 3/2*dual(dr/r)) --The division at the end implies the estimate of the derivative at r is about (dψ+dψ')/2.

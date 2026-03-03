@@ -18,7 +18,7 @@ Calculates electron arrangements, electron affinities/ionisation energies, asymp
 
 ## Physics model
 
-It's based on a realistic but very approximated and non-relativistic quantum model. Electrons are bound to the nucleus with an r^-2 potential, with a short range repulsive force of the form r^-2 * e^-r. The following physical constants are normalised to 1:
+It's based on a realistic but very approximated and non-relativistic quantum model. Electrons are bound to the nucleus with an r^-2^ potential, with a short range repulsive force following the 4D Yukawa potential K~1~(r)/r, where K~1~ is a Bessel function. The following physical constants are normalised to 1:
 
   * electron mass
   * electron charge
